@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import AppSidebar from './components/AppSidebar.vue'
@@ -12,15 +12,22 @@ const store = useAppStore()
 const route = useRoute()
 
 function onKeydown(e: KeyboardEvent) {
+  if (e.repeat) return
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); store.commandOpen = !store.commandOpen }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); store.commandOpen = true }
   if (e.key === 'Escape') {
     if (store.focusFullscreen) store.focusFullscreen = false
     else if (store.taskDrawerOpen) store.taskDrawerOpen = false
     else store.commandOpen = false
   }
 }
+const stopScrollWatch = watch(
+  () => store.commandOpen || store.taskDrawerOpen || store.focusFullscreen,
+  locked => { document.body.style.overflow = locked ? 'hidden' : '' },
+  { immediate: true }
+)
 onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onUnmounted(() => { window.removeEventListener('keydown', onKeydown); stopScrollWatch(); document.body.style.overflow = '' })
 </script>
 
 <template>

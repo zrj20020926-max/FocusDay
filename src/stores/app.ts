@@ -57,6 +57,29 @@ export const useAppStore = defineStore('app', {
       const task = this.tasks.find(t => t.id === id)
       if (task) { task.status = status; task.completed = status === 'done'; this.notify('任务状态已更新') }
     },
+    reorderTask(draggedId: number, targetId: number) {
+      if (draggedId === targetId) return
+      const from = this.tasks.findIndex(t => t.id === draggedId)
+      const to = this.tasks.findIndex(t => t.id === targetId)
+      if (from < 0 || to < 0) return
+      const [task] = this.tasks.splice(from, 1)
+      this.tasks.splice(to, 0, task)
+      this.notify('任务顺序已更新')
+    },
+    updateTask(id: number, updates: Partial<Pick<Task, 'title' | 'due' | 'estimate'>>) {
+      const task = this.tasks.find(t => t.id === id)
+      if (!task) return
+      Object.assign(task, updates)
+      this.notify('任务详情已保存')
+    },
+    deleteTask(id: number) {
+      const index = this.tasks.findIndex(t => t.id === id)
+      if (index < 0) return
+      this.tasks.splice(index, 1)
+      this.taskDrawerOpen = false
+      this.selectedTaskId = null
+      this.notify('任务已删除')
+    },
     notify(message: string) {
       this.toast = message
       window.setTimeout(() => { if (this.toast === message) this.toast = '' }, 2600)

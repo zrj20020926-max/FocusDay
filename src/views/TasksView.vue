@@ -7,6 +7,7 @@ const store = useAppStore(); const view = ref<'list'|'board'>('list'); const sea
 const filtered = computed(() => store.tasks.filter(t => t.title.toLowerCase().includes(search.value.toLowerCase())))
 const columns: { key: TaskStatus; label: string; color: string }[] = [{key:'todo',label:'待办',color:'#c2a473'},{key:'doing',label:'进行中',color:'#92aa8b'},{key:'done',label:'已完成',color:'#9ba4b3'}]
 function drop(status: TaskStatus) { if (dragging.value) store.moveTask(dragging.value, status); dragging.value = null }
+function reorder(targetId: number) { if (dragging.value) store.reorderTask(dragging.value, targetId); dragging.value = null }
 </script>
 
 <template>
@@ -16,18 +17,19 @@ function drop(status: TaskStatus) { if (dragging.value) store.moveTask(dragging.
     <transition name="view" mode="out-in">
       <section v-if="view==='list'" key="list" class="all-task-list">
         <div class="list-labels"><span>任务</span><span>优先级</span><span>分类</span><span>截止日期</span><span /></div>
-        <div v-for="task in filtered" :key="task.id" class="data-task" @click="store.openTask(task.id)">
-          <div class="data-title"><button class="task-check" @click.stop="store.toggleTask(task.id)"><span/></button><strong :class="{done:task.completed}">{{task.title}}</strong></div>
+        <div v-for="task in filtered" :key="task.id" class="data-task" :class="{ completed: task.completed }" draggable="true" @dragstart="dragging=task.id" @dragover.prevent @drop.prevent="reorder(task.id)" @click="store.openTask(task.id)">
+          <div class="data-title"><button class="task-check" :aria-label="task.completed ? '恢复任务' : '完成任务'" @click.stop="store.toggleTask(task.id)"><span/></button><strong :class="{done:task.completed}">{{task.title}}</strong></div>
           <span class="priority-badge" :class="task.priority">{{task.priority==='high'?'高':task.priority==='medium'?'中':'低'}}</span>
           <span class="category-pill"><i :style="{background:task.color}"/>{{task.category}}</span><span class="due-date"><CalendarDays :size="14"/>{{task.due}}</span><button class="more"><MoreHorizontal :size="18"/></button>
         </div>
+        <div v-if="!filtered.length" class="task-empty"><span>没有找到相关任务</span><p>换一个关键词，或创建一项新任务。</p><button @click="store.commandOpen=true"><Plus :size="16" />新建任务</button></div>
       </section>
       <section v-else key="board" class="kanban">
         <div v-for="column in columns" :key="column.key" class="kanban-column" @dragover.prevent @drop="drop(column.key)">
           <header><div><i :style="{background:column.color}"/><strong>{{column.label}}</strong><span>{{filtered.filter(t=>t.status===column.key).length}}</span></div><button><Plus :size="16"/></button></header>
           <div v-for="task in filtered.filter(t=>t.status===column.key)" :key="task.id" class="kanban-card" draggable="true" @dragstart="dragging=task.id" @click="store.openTask(task.id)">
             <GripVertical :size="15" class="kanban-grip"/><span class="category-pill"><i :style="{background:task.color}"/>{{task.category}}</span><strong>{{task.title}}</strong><div><span><CalendarDays :size="14"/>{{task.due}}</span><span>{{task.estimate}} 分钟</span></div>
-          </div><button class="add-card"><Plus :size="15"/>添加任务</button>
+          </div><div v-if="!filtered.filter(t=>t.status===column.key).length" class="column-empty">暂无任务</div><button class="add-card" @click="store.commandOpen=true"><Plus :size="15"/>添加任务</button>
         </div>
       </section>
     </transition>

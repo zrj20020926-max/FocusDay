@@ -1,16 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import TodayView from './views/TodayView.vue'
-import TasksView from './views/TasksView.vue'
-import FocusView from './views/FocusView.vue'
-import StatsView from './views/StatsView.vue'
 
 export default createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'today', component: TodayView },
-    { path: '/tasks', name: 'tasks', component: TasksView },
-    { path: '/focus', name: 'focus', component: FocusView },
-    { path: '/stats', name: 'stats', component: StatsView },
+    { path: '/', name: 'today', component: () => import('./views/TodayView.vue') },
+    { path: '/tasks', name: 'tasks', component: () => import('./views/TasksView.vue') },
+    { path: '/focus', name: 'focus', component: () => import('./views/FocusView.vue') },
+    { path: '/stats', name: 'stats', component: () => import('./views/StatsView.vue') },
+    { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]
 })

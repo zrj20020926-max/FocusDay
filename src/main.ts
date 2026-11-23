@@ -6,5 +6,7 @@ import './styles.css'
 import './parts.css'
 import './extras.css'
 import './responsive.css'
+import './polish.css'
+import './detail-polish.css'
 
 createApp(App).use(createPinia()).use(router).mount('#app')

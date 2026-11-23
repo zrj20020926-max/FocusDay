@@ -6,7 +6,8 @@ const nav = [
   { to: '/', label: '今日', icon: CalendarDays },
   { to: '/tasks', label: '任务', icon: CheckSquare2 },
   { to: '/focus', label: '专注', icon: Timer },
-  { to: '/stats', label: '统计', icon: ChartNoAxesCombined }
+  { to: '/stats', label: '统计', icon: ChartNoAxesCombined },
+  { to: '/settings', label: '设置', icon: Settings }
 ]
 </script>
 
@@ -22,7 +23,6 @@ const nav = [
     <div class="nav-label">空间</div>
     <nav class="nav-section secondary-nav">
       <a class="nav-item"><Tags :size="18" /><span>分类管理</span><span class="nav-count">5</span></a>
-      <a class="nav-item"><Settings :size="18" /><span>设置</span></a>
     </nav>
     <div class="sidebar-spacer" />
     <button class="search-hint" @click="store.commandOpen = true"><Search :size="16" /><span>快速搜索</span><kbd>⌘ K</kbd></button>
