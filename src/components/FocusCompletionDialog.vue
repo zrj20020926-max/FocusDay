@@ -21,9 +21,9 @@ async function continueFocus() {
   if (!session.value) return
   sessions.dismissCompletion()
   if (!['RUNNING', 'PAUSED'].includes(timer.timerState.status)) {
-    timer.selectMode(session.value.mode)
-    timer.setTask(session.value.taskId)
-    timer.start(session.value.taskId)
+    await timer.selectMode(session.value.mode)
+    await timer.setTask(session.value.taskId)
+    await timer.start(session.value.taskId)
   }
   await router.push('/focus')
 }

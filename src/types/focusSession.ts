@@ -26,6 +26,14 @@ export interface FocusSessionStorage {
   save(snapshot: FocusSessionSnapshot): void
 }
 
+export interface FocusSessionRepositoryPort {
+  list(includeDeleted?: boolean): Promise<FocusSession[]>
+  findById(id: string): Promise<FocusSession | null>
+  upsert(session: FocusSession): Promise<FocusSession>
+  bulkUpsert(sessions: FocusSession[]): Promise<FocusSession[]>
+  softDelete(id: string): Promise<boolean>
+}
+
 export interface FocusSummary {
   duration: number
   focusCount: number

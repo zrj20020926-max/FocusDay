@@ -2,19 +2,20 @@ import type {
   CancelledSessionInput,
   FocusRecordSyncResult,
   FocusSession,
+  FocusSessionRepositoryPort,
   FocusSessionSnapshot,
   FocusSessionStorage,
   FocusSummary,
   TimerFocusRecord,
 } from '../../types/focusSession'
 
-const STORAGE_KEY = 'focus-day.focus-sessions.v1'
+export const FOCUS_SESSION_STORAGE_KEY = 'focus-day.focus-sessions.v1'
 
 function clone<T>(value: T): T { return structuredClone(value) }
 
 export class LocalStorageFocusSessionStorage implements FocusSessionStorage {
   load(): FocusSessionSnapshot | null {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(FOCUS_SESSION_STORAGE_KEY)
     if (!raw) return null
     const snapshot = JSON.parse(raw) as FocusSessionSnapshot
     if (snapshot?.version !== 1 || !Array.isArray(snapshot.sessions)) throw new Error('专注记录数据无效')
@@ -22,7 +23,7 @@ export class LocalStorageFocusSessionStorage implements FocusSessionStorage {
   }
 
   save(snapshot: FocusSessionSnapshot): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
+    localStorage.setItem(FOCUS_SESSION_STORAGE_KEY, JSON.stringify(snapshot))
   }
 }
 
@@ -30,23 +31,22 @@ export class FocusSessionService {
   private sessions: FocusSession[] = []
   private initialized = false
 
-  constructor(private readonly storage: FocusSessionStorage) {}
+  constructor(private readonly repository: FocusSessionRepositoryPort) {}
 
-  initialize(): FocusSession[] {
+  async initialize(): Promise<FocusSession[]> {
     if (!this.initialized) {
-      this.sessions = this.storage.load()?.sessions ?? []
+      this.sessions = await this.repository.list()
       this.initialized = true
     }
     return this.getAll()
   }
 
   getAll(): FocusSession[] {
-    if (!this.initialized) this.initialize()
     return clone(this.sessions).sort((a, b) => b.endTime - a.endTime)
   }
 
-  syncTimerRecords(records: TimerFocusRecord[]): FocusRecordSyncResult {
-    if (!this.initialized) this.initialize()
+  async syncTimerRecords(records: TimerFocusRecord[]): Promise<FocusRecordSyncResult> {
+    if (!this.initialized) await this.initialize()
     const created: FocusSession[] = []
     for (const record of records) {
       const id = `focus:${record.id}`
@@ -67,12 +67,12 @@ export class FocusSessionService {
       if (index >= 0) this.sessions[index] = session
       else { this.sessions.push(session); created.push(session) }
     }
-    if (created.length > 0) this.persist()
+    if (created.length > 0) await this.repository.bulkUpsert(created)
     return { created: clone(created), sessions: this.getAll() }
   }
 
-  recordCancellation(input: CancelledSessionInput): FocusSession {
-    if (!this.initialized) this.initialize()
+  async recordCancellation(input: CancelledSessionInput): Promise<FocusSession> {
+    if (!this.initialized) await this.initialize()
     const { timerState, endedAt } = input
     const id = `focus:${timerState.sessionId}:${timerState.phaseSequence}:cancelled`
     const session: FocusSession = {
@@ -91,7 +91,7 @@ export class FocusSessionService {
     const index = this.sessions.findIndex(item => item.id === id)
     if (index >= 0) this.sessions[index] = session
     else this.sessions.push(session)
-    this.persist()
+    await this.repository.upsert(session)
     return clone(session)
   }
 
@@ -136,7 +136,4 @@ export class FocusSessionService {
     return Math.min(session.duration, Math.round(session.duration * overlapRatio))
   }
 
-  private persist(): void {
-    this.storage.save({ version: 1, sessions: clone(this.sessions) })
-  }
 }

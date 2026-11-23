@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
-import { LocalStorageTaskRepository } from '../repositories/task/LocalStorageTaskRepository'
+import { IndexedDbTaskRepository } from '../services/database/repositories/TaskRepository'
 import { CategoryService } from '../services/task/CategoryService'
 import { TaskService } from '../services/task/TaskService'
 import { TaskDomainError, localDateKey, type CreateCategoryInput, type CreateTaskInput, type Task, type TaskCategory, type TaskFilter, type TaskStatus, type UpdateCategoryInput, type UpdateTaskInput } from '../types/task'
 import { useAppStore } from './app'
 
-const repository = new LocalStorageTaskRepository()
+const repository = new IndexedDbTaskRepository()
 const taskService = new TaskService(repository)
 const categoryService = new CategoryService(repository)
 

@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
-import { FocusSessionService, LocalStorageFocusSessionStorage } from '../services/focus/FocusSessionService'
+import { FocusSessionService } from '../services/focus/FocusSessionService'
+import { FocusSessionRepository } from '../services/database/repositories/FocusSessionRepository'
 import type { FocusRecord } from '../types/timer'
 import type { FocusSession, FocusSummary } from '../types/focusSession'
 import type { TimerState } from '../types/timer'
 
-const service = new FocusSessionService(new LocalStorageFocusSessionStorage())
+const service = new FocusSessionService(new FocusSessionRepository())
 const emptySummary = (): FocusSummary => ({ duration: 0, focusCount: 0, completedPomodoros: 0 })
 
 export const useFocusSessionStore = defineStore('focusSessions', {
@@ -31,22 +32,22 @@ export const useFocusSessionStore = defineStore('focusSessions', {
     },
   },
   actions: {
-    initialize() {
+    async initialize() {
       if (this.initialized) return
-      this.sessions = service.initialize()
+      this.sessions = await service.initialize()
       this.initialized = true
     },
-    syncTimerRecords(records: FocusRecord[], showFeedback = true): FocusSession[] {
-      if (!this.initialized) this.initialize()
-      const result = service.syncTimerRecords(records)
+    async syncTimerRecords(records: FocusRecord[], showFeedback = true): Promise<FocusSession[]> {
+      if (!this.initialized) await this.initialize()
+      const result = await service.syncTimerRecords(records)
       this.sessions = result.sessions
       const latest = result.created[result.created.length - 1]
       if (showFeedback && latest) this.completionSessionId = latest.id
       return result.created
     },
-    recordCancellation(timerState: TimerState, duration: number, endedAt: number) {
-      if (!this.initialized) this.initialize()
-      service.recordCancellation({ timerState, duration, endedAt })
+    async recordCancellation(timerState: TimerState, duration: number, endedAt: number) {
+      if (!this.initialized) await this.initialize()
+      await service.recordCancellation({ timerState, duration, endedAt })
       this.sessions = service.getAll()
     },
     dismissCompletion() { this.completionSessionId = null },

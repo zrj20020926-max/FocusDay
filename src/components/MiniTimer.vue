@@ -8,10 +8,10 @@ const { timer, state, displayTime, progress, isRunning, modeLabel, phaseLabel } 
 const taskStore = useTaskStore()
 const taskTitle = computed(() => taskStore.getTaskById(state.value.taskId)?.title ?? '暂未选择任务')
 
-function resetCurrent() {
-  if (['RUNNING', 'PAUSED'].includes(state.value.status)) timer.cancel()
-  if (state.value.mode === 'COUNTDOWN') timer.reset()
-  else timer.selectMode(state.value.mode)
+async function resetCurrent() {
+  if (['RUNNING', 'PAUSED'].includes(state.value.status)) await timer.cancel()
+  if (state.value.mode === 'COUNTDOWN') await timer.reset()
+  else await timer.selectMode(state.value.mode)
 }
 </script>
 

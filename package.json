@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@vueuse/core": "^13.9.0",
+    "dexie": "^4.4.7",
     "echarts": "^5.6.0",
     "lucide-vue-next": "^0.468.0",
     "pinia": "^2.3.0",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
+    "fake-indexeddb": "^6.2.8",
     "typescript": "~5.7.2",
     "vite": "^6.0.5",
     "vitest": "^4.1.12",

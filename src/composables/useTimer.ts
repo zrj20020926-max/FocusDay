@@ -6,9 +6,9 @@ const phaseLabels = { FOCUS: '专注', SHORT_BREAK: '短休息', LONG_BREAK: '�
 
 export function useTimer() {
   const timer = useTimerStore()
-  timer.initialize()
+  void timer.initialize()
   let interval: number | undefined
-  const refresh = () => timer.tick()
+  const refresh = () => { void timer.tick() }
 
   onMounted(() => {
     refresh()

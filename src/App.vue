@@ -18,7 +18,7 @@ const timerStore = useTimerStore()
 const focusSessionStore = useFocusSessionStore()
 const route = useRoute()
 void taskStore.initialize()
-timerStore.initialize()
+void timerStore.initialize()
 
 function onKeydown(e: KeyboardEvent) {
   if (e.repeat) return

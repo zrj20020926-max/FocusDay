@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { Bell, Clock3, Palette, PanelRight, Volume2, Sun, ChevronRight, Check } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { useTimerStore } from '../stores/timerStore'
@@ -12,6 +12,14 @@ const focusMinutes = ref(timerStore.config.pomodoro.focusDuration / 60000)
 const shortBreakMinutes = ref(timerStore.config.pomodoro.shortBreakDuration / 60000)
 const longBreakMinutes = ref(timerStore.config.pomodoro.longBreakDuration / 60000)
 const longBreakEvery = ref(timerStore.config.pomodoro.longBreakEvery)
+
+watch(() => timerStore.initialized, initialized => {
+  if (!initialized) return
+  focusMinutes.value = timerStore.config.pomodoro.focusDuration / 60000
+  shortBreakMinutes.value = timerStore.config.pomodoro.shortBreakDuration / 60000
+  longBreakMinutes.value = timerStore.config.pomodoro.longBreakDuration / 60000
+  longBreakEvery.value = timerStore.config.pomodoro.longBreakEvery
+}, { immediate: true })
 
 function toggle(model: 'notifications' | 'focusSound') {
   if (model === 'notifications') notifications.value = !notifications.value

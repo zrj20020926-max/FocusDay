@@ -2,13 +2,13 @@ import type { TaskRepository } from './TaskRepository'
 import type { Task, TaskCategory } from '../../types/task'
 import { localDateKey, TaskDomainError } from '../../types/task'
 
-interface StoredTaskData {
+export interface StoredTaskData {
   version: 1
   tasks: Task[]
   categories: TaskCategory[]
 }
 
-const STORAGE_KEY = 'focus-day.task-data.v1'
+export const TASK_STORAGE_KEY = 'focus-day.task-data.v1'
 
 function addDays(dateKey: string, days: number): string {
   const [year, month, day] = dateKey.split('-').map(Number)
@@ -16,7 +16,7 @@ function addDays(dateKey: string, days: number): string {
   return localDateKey(date)
 }
 
-function createSeedData(): StoredTaskData {
+export function createSeedTaskData(): StoredTaskData {
   const now = new Date().toISOString()
   const today = localDateKey()
   const tomorrow = addDays(today, 1)
@@ -58,9 +58,9 @@ function createSeedData(): StoredTaskData {
 export class LocalStorageTaskRepository implements TaskRepository {
   private read(): StoredTaskData {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
+      const raw = localStorage.getItem(TASK_STORAGE_KEY)
       if (!raw) {
-        const seed = createSeedData()
+        const seed = createSeedTaskData()
         this.write(seed)
         return seed
       }
@@ -77,7 +77,7 @@ export class LocalStorageTaskRepository implements TaskRepository {
 
   private write(data: StoredTaskData): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+      localStorage.setItem(TASK_STORAGE_KEY, JSON.stringify(data))
     } catch {
       throw new TaskDomainError('无法保存本地任务数据', 'PERSISTENCE_ERROR')
     }
