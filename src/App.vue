@@ -4,15 +4,18 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { useTaskStore } from './stores/taskStore'
 import { useTimerStore } from './stores/timerStore'
+import { useFocusSessionStore } from './stores/focusSessionStore'
 import AppSidebar from './components/AppSidebar.vue'
 import RightPanel from './components/RightPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
+import FocusCompletionDialog from './components/FocusCompletionDialog.vue'
 import { PanelRightOpen } from 'lucide-vue-next'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
 const timerStore = useTimerStore()
+const focusSessionStore = useFocusSessionStore()
 const route = useRoute()
 void taskStore.initialize()
 timerStore.initialize()
@@ -28,7 +31,7 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 const stopScrollWatch = watch(
-  () => store.commandOpen || store.taskDrawerOpen || store.focusFullscreen,
+  () => store.commandOpen || store.taskDrawerOpen || store.focusFullscreen || !!focusSessionStore.completionSessionId,
   locked => { document.body.style.overflow = locked ? 'hidden' : '' },
   { immediate: true }
 )
@@ -48,6 +51,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKeydown); stopScroll
     <button v-else class="panel-reopen icon-button" title="展开辅助栏" @click="store.rightPanelOpen = true"><PanelRightOpen :size="19" /></button>
     <CommandPalette />
     <TaskDrawer />
+    <FocusCompletionDialog />
     <transition name="toast"><div v-if="store.toast" class="toast"><span class="toast-dot">✓</span>{{ store.toast }}</div></transition>
   </div>
 </template>

@@ -3,13 +3,13 @@ import { computed } from 'vue'
 import { PanelRightClose, Clock3, CheckCircle2, ArrowUpRight } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { formatTaskDate, useTaskStore } from '../stores/taskStore'
-import { useTimerStore } from '../stores/timerStore'
+import { useFocusSessionStore } from '../stores/focusSessionStore'
 import MiniTimer from './MiniTimer.vue'
 const store = useAppStore()
 const taskStore = useTaskStore()
-const timerStore = useTimerStore()
+const focusStore = useFocusSessionStore()
 const todayProgress = computed(() => taskStore.todayTasks.length ? Math.round(taskStore.todayTasks.filter(task => task.status === 'COMPLETED').length / taskStore.todayTasks.length * 100) : 0)
-const focusSummary = computed(() => `${Math.floor(timerStore.todayFocusDuration / 3600000)}h ${Math.floor(timerStore.todayFocusDuration % 3600000 / 60000)}m`)
+const focusSummary = computed(() => `${Math.floor(focusStore.todaySummary.duration / 3600000)}h ${Math.floor(focusStore.todaySummary.duration % 3600000 / 60000)}m`)
 </script>
 
 <template>

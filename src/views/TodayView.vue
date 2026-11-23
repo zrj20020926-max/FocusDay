@@ -5,10 +5,14 @@ import TaskItem from '../components/TaskItem.vue'
 import { useAppStore } from '../stores/app'
 import { useTaskStore } from '../stores/taskStore'
 import { useTimerStore } from '../stores/timerStore'
-const store = useAppStore(); const taskStore = useTaskStore(); const timerStore = useTimerStore(); const title = ref('')
+import { useFocusSessionStore } from '../stores/focusSessionStore'
+import { localDateKey } from '../types/task'
+const store = useAppStore(); const taskStore = useTaskStore(); const timerStore = useTimerStore(); const focusStore = useFocusSessionStore(); const title = ref('')
 const todayProgress = computed(() => taskStore.todayTasks.length ? Math.round(taskStore.todayTasks.filter(task => task.status === 'COMPLETED').length / taskStore.todayTasks.length * 100) : 0)
-const focusHours = computed(() => Math.floor(timerStore.todayFocusDuration / 3600000))
-const focusMinutes = computed(() => Math.floor(timerStore.todayFocusDuration % 3600000 / 60000))
+const focusHours = computed(() => Math.floor(focusStore.todaySummary.duration / 3600000))
+const focusMinutes = computed(() => Math.floor(focusStore.todaySummary.duration % 3600000 / 60000))
+const todayCompletedTasks = computed(() => taskStore.tasks.filter(task => task.completedAt && localDateKey(new Date(task.completedAt)) === localDateKey()).length)
+const currentTask = computed(() => timerStore.timerState.taskId ? taskStore.getTaskById(timerStore.timerState.taskId) : null)
 async function add() {
   const created = await taskStore.createTask({ title: title.value })
   if (created) title.value = ''
@@ -22,9 +26,9 @@ async function add() {
       <button class="primary-button mobile-add" @click="store.commandOpen=true"><Plus :size="18"/>新建任务</button>
     </header>
     <section class="daily-overview">
-      <div class="overview-main"><div class="ring-progress"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="35"/><circle class="value" cx="42" cy="42" r="35" :style="{strokeDashoffset: 220 - 220 * todayProgress / 100}"/></svg><strong>{{ todayProgress }}<small>%</small></strong></div><div><span class="eyebrow">TODAY'S RHYTHM</span><h2>今天已完成 {{ taskStore.todayTasks.filter(t=>t.status==='COMPLETED').length }} 项任务</h2><p>状态不错，再专注一会儿就能更接近今日目标。</p></div></div>
+      <div class="overview-main"><div class="ring-progress"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="35"/><circle class="value" cx="42" cy="42" r="35" :style="{strokeDashoffset: 220 - 220 * todayProgress / 100}"/></svg><strong>{{ todayProgress }}<small>%</small></strong></div><div><span class="eyebrow">TODAY'S RHYTHM</span><h2>今天已完成 {{ todayCompletedTasks }} 项任务</h2><p>完成番茄 {{focusStore.todaySummary.completedPomodoros}} 个，累计专注 {{focusStore.todaySummary.focusCount}} 次。</p></div></div>
       <div class="overview-stat"><span>专注时长</span><strong>{{focusHours}}<small>h</small> {{focusMinutes}}<small>m</small></strong><p>仅统计有效专注时间</p></div>
-      <div class="overview-quote"><Sparkles :size="19"/><p>“伟大的作品，来自许多个安静而专注的时刻。”</p></div>
+      <div class="overview-quote"><Sparkles :size="19"/><p v-if="['RUNNING','PAUSED'].includes(timerStore.timerState.status)"><strong>当前专注</strong><br/>{{currentTask?.title ?? '自由专注'}} · {{timerStore.timerState.status==='PAUSED'?'已暂停':'正在进行'}}</p><p v-else>“伟大的作品，来自许多个安静而专注的时刻。”</p></div>
     </section>
     <section class="tasks-section">
       <div class="section-title"><div><span class="eyebrow">MY DAY</span><h2>今日任务 <span>{{ taskStore.todayTasks.filter(t=>t.status!=='COMPLETED').length }}</span></h2></div><router-link to="/tasks">查看全部 <ArrowRight :size="15"/></router-link></div>

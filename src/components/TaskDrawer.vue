@@ -4,11 +4,18 @@ import { X, CalendarDays, Flag, Tags, Clock3, AlignLeft, Check, Play, Pencil, Tr
 import { useAppStore } from '../stores/app'
 import { formatTaskDate, useTaskStore } from '../stores/taskStore'
 import { localDateKey, type TaskPriority, type TaskStatus } from '../types/task'
+import { useFocusSessionStore } from '../stores/focusSessionStore'
+import { formatTimerDuration } from '../services/timer/TimerCalculator'
+import { useTaskFocus } from '../composables/useTaskFocus'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
+const focusStore = useFocusSessionStore()
+const { startTaskFocus } = useTaskFocus()
 const task = computed(() => taskStore.getTaskById(store.selectedTaskId))
 const category = computed(() => task.value ? taskStore.getCategoryById(task.value.categoryId) : undefined)
+const focusSummary = computed(() => task.value ? focusStore.taskSummary(task.value.id) : { duration: 0, focusCount: 0, completedPomodoros: 0 })
+const focusHistory = computed(() => task.value ? focusStore.taskSessions(task.value.id).slice(0, 5) : [])
 const editing = ref(false)
 const confirmingDelete = ref(false)
 const draftTitle = ref('')
@@ -97,14 +104,18 @@ function tomorrow(): string {
           <div><span><Tags :size="16" />分类</span><strong><i :style="{ background: category?.color }" />{{ category?.name ?? '其他' }}</strong></div>
           <div><span><Clock3 :size="16" />预计用时</span><strong>{{ task.estimatedDuration }} 分钟</strong></div>
           <div><span><Clock3 :size="16" />番茄钟</span><strong>{{ task.estimatedPomodoros }} 个</strong></div>
+          <div><span><Clock3 :size="16" />实际专注</span><strong>{{ formatTimerDuration(focusSummary.duration) }}</strong></div>
+          <div><span><Clock3 :size="16" />完成番茄</span><strong>{{ focusSummary.completedPomodoros }} 个</strong></div>
+          <div><span><Clock3 :size="16" />专注次数</span><strong>{{ focusSummary.focusCount }} 次</strong></div>
         </div>
         <div v-if="!editing" class="notes"><span><AlignLeft :size="16" />备注</span><p>{{ task.description || '还没有添加任务描述。' }}</p></div>
+        <div v-if="!editing" class="focus-history"><div class="section-heading"><h3>历史专注记录</h3><span>{{focusSummary.focusCount}} 次</span></div><div v-if="focusHistory.length"><div v-for="session in focusHistory" :key="session.id"><span>{{new Date(session.endTime).toLocaleDateString('zh-CN')}} · {{session.mode==='POMODORO'?'番茄钟':session.mode==='STOPWATCH'?'正计时':'倒计时'}}{{session.status==='CANCELLED'?' · 已取消':''}}</span><strong>{{formatTimerDuration(session.duration)}}</strong></div></div><p v-else>还没有专注记录，从一次安静的专注开始吧。</p></div>
       </div>
       <footer>
         <button class="delete-button" :class="{ confirming: confirmingDelete }" @click="remove"><Trash2 :size="16" />{{ confirmingDelete ? '再次点击确认删除' : '删除' }}</button>
         <span class="drawer-footer-spacer" />
         <button v-if="editing" class="primary-button" @click="save"><Save :size="17" />保存修改</button>
-        <template v-else><button class="secondary-button" @click="taskStore.updateTask(task.id, { plannedDate: tomorrow(), dueDate: tomorrow() })">移到明天</button><button class="primary-button" @click="$router.push('/focus'); store.taskDrawerOpen=false"><Play :size="17" fill="currentColor"/>开始专注</button></template>
+        <template v-else><button class="secondary-button" @click="taskStore.updateTask(task.id, { plannedDate: tomorrow(), dueDate: tomorrow() })">移到明天</button><button class="primary-button" @click="startTaskFocus(task.id)"><Play :size="17" fill="currentColor"/>开始专注</button></template>
       </footer>
     </aside>
   </div></transition></Teleport>

@@ -13,9 +13,6 @@ const focusableTasks = computed(() => taskStore.sortedTasks.filter(task => task.
 const selectedTaskId = computed({ get: () => state.value.taskId ?? '', set: value => { timer.setTask(value || null) } })
 const countdownMinutes = ref(Math.round(timer.config.countdownDuration / 60000))
 watch(() => timer.config.countdownDuration, value => { countdownMinutes.value = Math.round(value / 60000) })
-watch(focusableTasks, tasks => {
-  if (!state.value.taskId && tasks[0] && !['RUNNING','PAUSED'].includes(state.value.status)) timer.setTask(tasks[0].id)
-}, { immediate: true })
 const modeMap: Record<TimerMode, {label:string;sub:string}> = {
   POMODORO:{label:'番茄钟',sub:'专注与休息自动循环'},
   STOPWATCH:{label:'正计时',sub:'自由记录每一段专注'},
@@ -36,7 +33,7 @@ function saveCountdown() { timer.updateConfig({ countdownDuration: Math.max(1, M
         <svg viewBox="0 0 340 340"><circle class="orbit-track" cx="170" cy="170" r="154"/><circle class="orbit-progress" cx="170" cy="170" r="154" :style="{'--progress': progress}"/><circle v-if="isRunning" class="orbit-glow" cx="170" cy="16" r="5"/></svg>
         <div class="focus-time"><span>{{ state.mode==='POMODORO' ? phaseLabel : modeMap[state.mode].label }}</span><strong>{{displayTime}}</strong><small>{{ isRunning ? (state.currentPhase==='FOCUS' ? '正在专注 · 保持呼吸' : '休息一下 · 为下一轮蓄力') : state.status==='PAUSED' ? '已暂停 · 随时继续' : state.mode==='STOPWATCH' ? '准备好就开始记录' : '准备好就开始吧' }}</small></div>
       </div>
-      <div class="focus-task-picker"><i/><select v-model="selectedTaskId" :disabled="['RUNNING','PAUSED'].includes(state.status)" aria-label="选择当前专注任务"><option v-if="!focusableTasks.length" value="">暂无待办任务</option><option v-for="task in focusableTasks" :key="task.id" :value="task.id">{{task.title}}</option></select><ChevronDown :size="18"/></div>
+      <div class="focus-task-picker"><i/><select v-model="selectedTaskId" :disabled="['RUNNING','PAUSED'].includes(state.status)" aria-label="选择当前专注任务"><option value="">自由专注（不关联任务）</option><option v-for="task in focusableTasks" :key="task.id" :value="task.id">{{task.title}}</option></select><ChevronDown :size="18"/></div>
       <div class="focus-controls"><button class="control-secondary" title="结束并记录" :disabled="!['RUNNING','PAUSED'].includes(state.status)" @click="timer.finish()"><Square :size="18" fill="currentColor"/></button><button class="focus-primary" @click="timer.toggle()"><component :is="isRunning?Pause:Play" :size="23" fill="currentColor"/>{{isRunning?'暂停一下':state.status==='PAUSED'?'继续专注':'开始专注'}}</button><button class="control-secondary" title="全屏专注" @click="store.focusFullscreen=true"><Maximize2 :size="19"/></button></div>
       <div class="focus-secondary-actions"><button v-if="['RUNNING','PAUSED'].includes(state.status)" @click="timer.cancel()">放弃本次计时</button><button v-if="state.mode==='COUNTDOWN' && !['RUNNING','PAUSED'].includes(state.status)" @click="timer.reset()"><RotateCcw :size="14"/>重置倒计时</button></div>
     </section>

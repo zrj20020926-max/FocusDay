@@ -4,6 +4,7 @@ import { TimerCalculator, formatTimerDuration } from '../services/timer/TimerCal
 import { TimerService, type TimerConfigUpdate } from '../services/timer/TimerService'
 import { DEFAULT_TIMER_CONFIG, TimerDomainError, type FocusRecord, type TimerConfig, type TimerMode, type TimerState } from '../types/timer'
 import { useAppStore } from './app'
+import { useFocusSessionStore } from './focusSessionStore'
 
 const service = new TimerService(new LocalStorageTimerStorage())
 
@@ -58,11 +59,6 @@ export const useTimerStore = defineStore('timer', {
     isRunning: state => state.timerState.status === 'RUNNING',
     isPaused: state => state.timerState.status === 'PAUSED',
     canStart: state => ['IDLE', 'COMPLETED', 'CANCELLED'].includes(state.timerState.status),
-    todayFocusDuration: state => {
-      const now = new Date()
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-      return state.records.filter(record => record.endedAt >= start).reduce((sum, record) => sum + record.duration, 0)
-    },
   },
   actions: {
     initialize() {
@@ -73,6 +69,9 @@ export const useTimerStore = defineStore('timer', {
         this.records = service.getRecords()
         this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
         this.initialized = true
+        const focusSessions = useFocusSessionStore()
+        focusSessions.initialize()
+        focusSessions.syncTimerRecords(this.records, false)
       } catch (error) { this.fail(error) }
     },
     tick() {
@@ -86,6 +85,7 @@ export const useTimerStore = defineStore('timer', {
         if (!changed) return
         this.timerState = synchronized
         this.records = service.getRecords()
+        useFocusSessionStore().syncTimerRecords(this.records, true)
         if (synchronized.status === 'COMPLETED' && previousStatus !== 'COMPLETED') useAppStore().notify('计时已完成')
         else if (synchronized.currentPhase !== previousPhase) useAppStore().notify(synchronized.currentPhase === 'FOCUS' ? '休息结束，进入下一轮' : '专注完成，开始休息')
       } catch (error) { this.fail(error) }
@@ -112,8 +112,14 @@ export const useTimerStore = defineStore('timer', {
       return state
     },
     cancel() {
+      const before = structuredClone(this.timerState)
+      const cancelAt = Math.max(this.nowMs, Date.now(), before.lastObservedAt)
+      const cancelledDuration = before.currentPhase === 'FOCUS' ? TimerCalculator.phaseElapsed(before, cancelAt) : 0
       const state = this.run(() => service.cancel())
-      if (state) useAppStore().notify('已放弃本次计时，不计入统计')
+      if (state) {
+        useFocusSessionStore().recordCancellation(before, cancelledDuration, state.endTime ?? this.nowMs)
+        useAppStore().notify('已放弃本次计时，不计入统计')
+      }
       return state
     },
     reset() { return this.run(() => service.reset()) },
@@ -132,6 +138,7 @@ export const useTimerStore = defineStore('timer', {
         this.timerState = operation()
         this.config = service.getConfig()
         this.records = service.getRecords()
+        useFocusSessionStore().syncTimerRecords(this.records, true)
         this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
         return this.timerState
       } catch (error) { this.fail(error); return null }

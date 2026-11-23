@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Plus, List, Columns3, Search, SlidersHorizontal, MoreHorizontal, CalendarDays, GripVertical } from 'lucide-vue-next'
+import { Plus, List, Columns3, Search, SlidersHorizontal, Play, CalendarDays, GripVertical } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { formatTaskDate, useTaskStore } from '../stores/taskStore'
 import type { TaskPriority, TaskStatus } from '../types/task'
+import { useTaskFocus } from '../composables/useTaskFocus'
 const store = useAppStore()
 const taskStore = useTaskStore()
+const { startTaskFocus } = useTaskFocus()
 const view = ref<'list'|'board'>('list')
 const search = ref('')
 const dragging = ref<string|null>(null)
@@ -36,7 +38,7 @@ function clearFilters() { statusFilter.value = ''; priorityFilter.value = ''; ca
         <div v-for="task in filtered" :key="task.id" class="data-task" :class="{ completed: task.status === 'COMPLETED' }" draggable="true" @dragstart="dragging=task.id" @dragover.prevent @drop.prevent="reorder(task.id)" @click="store.openTask(task.id)">
           <div class="data-title"><button class="task-check" :aria-label="task.status === 'COMPLETED' ? '恢复任务' : '完成任务'" @click.stop="taskStore.toggleTask(task.id)"><span/></button><strong :class="{done:task.status === 'COMPLETED'}">{{task.title}}</strong></div>
           <span class="priority-badge" :class="task.priority.toLowerCase()">{{task.priority==='HIGH'?'高':task.priority==='MEDIUM'?'中':'低'}}</span>
-          <span class="category-pill"><i :style="{background:taskStore.getCategoryById(task.categoryId)?.color}"/>{{taskStore.getCategoryById(task.categoryId)?.name ?? '其他'}}</span><span class="due-date"><CalendarDays :size="14"/>{{formatTaskDate(task.dueDate)}}</span><button class="more"><MoreHorizontal :size="18"/></button>
+          <span class="category-pill"><i :style="{background:taskStore.getCategoryById(task.categoryId)?.color}"/>{{taskStore.getCategoryById(task.categoryId)?.name ?? '其他'}}</span><span class="due-date"><CalendarDays :size="14"/>{{formatTaskDate(task.dueDate)}}</span><button class="more" title="开始专注" @click.stop="startTaskFocus(task.id)"><Play :size="17" fill="currentColor"/></button>
         </div>
         <div v-if="!filtered.length" class="task-empty"><span>没有找到相关任务</span><p>换一个关键词，或创建一项新任务。</p><button @click="store.commandOpen=true"><Plus :size="16" />新建任务</button></div>
       </section>
