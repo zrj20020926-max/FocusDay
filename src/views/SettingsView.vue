@@ -2,17 +2,29 @@
 import { ref } from 'vue'
 import { Bell, Clock3, Palette, PanelRight, Volume2, Sun, ChevronRight, Check } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
+import { useTimerStore } from '../stores/timerStore'
 
 const store = useAppStore()
+const timerStore = useTimerStore()
 const notifications = ref(true)
 const focusSound = ref(true)
-const autoBreak = ref(false)
+const focusMinutes = ref(timerStore.config.pomodoro.focusDuration / 60000)
+const shortBreakMinutes = ref(timerStore.config.pomodoro.shortBreakDuration / 60000)
+const longBreakMinutes = ref(timerStore.config.pomodoro.longBreakDuration / 60000)
+const longBreakEvery = ref(timerStore.config.pomodoro.longBreakEvery)
 
-function toggle(model: 'notifications' | 'focusSound' | 'autoBreak') {
+function toggle(model: 'notifications' | 'focusSound') {
   if (model === 'notifications') notifications.value = !notifications.value
   if (model === 'focusSound') focusSound.value = !focusSound.value
-  if (model === 'autoBreak') autoBreak.value = !autoBreak.value
   store.notify('设置已更新')
+}
+function saveTimerConfig() {
+  timerStore.updateConfig({ pomodoro: {
+    focusDuration: Math.max(1, Math.round(focusMinutes.value || 1)) * 60000,
+    shortBreakDuration: Math.max(1, Math.round(shortBreakMinutes.value || 1)) * 60000,
+    longBreakDuration: Math.max(1, Math.round(longBreakMinutes.value || 1)) * 60000,
+    longBreakEvery: Math.max(1, Math.round(longBreakEvery.value || 1)),
+  } })
 }
 </script>
 
@@ -45,9 +57,9 @@ function toggle(model: 'notifications' | 'focusSound' | 'autoBreak') {
 
         <section id="focus-preferences" class="setting-section">
           <div class="setting-heading"><h2>专注偏好</h2><p>设置计时过程中的默认体验。</p></div>
-          <button class="setting-row selectable"><span class="setting-icon"><Clock3 :size="18" /></span><div><strong>默认番茄时长</strong><small>专注 25 分钟，休息 5 分钟</small></div><span class="setting-value">25 分钟</span><ChevronRight :size="17" /></button>
+          <div class="setting-row timer-config-row"><span class="setting-icon"><Clock3 :size="18" /></span><div><strong>番茄钟节奏</strong><small>修改会应用到下一次计时，进行中的会话不会被打断</small><div class="timer-config-inputs"><label>专注<input v-model.number="focusMinutes" type="number" min="1" @change="saveTimerConfig"/>分</label><label>短休息<input v-model.number="shortBreakMinutes" type="number" min="1" @change="saveTimerConfig"/>分</label><label>长休息<input v-model.number="longBreakMinutes" type="number" min="1" @change="saveTimerConfig"/>分</label><label>每<input v-model.number="longBreakEvery" type="number" min="1" @change="saveTimerConfig"/>轮长休</label></div></div></div>
           <div class="setting-row"><span class="setting-icon"><Volume2 :size="18" /></span><div><strong>专注环境声</strong><small>开始专注时播放轻柔的背景声音</small></div><button class="switch" :class="{ on: focusSound }" role="switch" :aria-checked="focusSound" @click="toggle('focusSound')"><span /></button></div>
-          <div class="setting-row"><span class="setting-icon"><Sun :size="18" /></span><div><strong>自动开始休息</strong><small>每轮专注结束后自动进入休息</small></div><button class="switch" :class="{ on: autoBreak }" role="switch" :aria-checked="autoBreak" @click="toggle('autoBreak')"><span /></button></div>
+          <div class="setting-row"><span class="setting-icon"><Sun :size="18" /></span><div><strong>自动衔接阶段</strong><small>每轮专注结束后自动休息，休息结束进入下一轮</small></div><button class="switch on" role="switch" aria-checked="true" disabled><span /></button></div>
         </section>
 
         <section id="notifications" class="setting-section">

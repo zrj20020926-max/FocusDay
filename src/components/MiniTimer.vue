@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { computed } from 'vue'
 import { Play, Pause, RotateCcw } from 'lucide-vue-next'
-const running = ref(false)
-const seconds = ref(25 * 60)
-let timer: number | undefined
-const time = computed(() => `${String(Math.floor(seconds.value / 60)).padStart(2, '0')}:${String(seconds.value % 60).padStart(2, '0')}`)
-function toggle() {
-  running.value = !running.value
-  if (running.value) timer = window.setInterval(() => { if (seconds.value > 0) seconds.value-- }, 1000)
-  else window.clearInterval(timer)
+import { useTimer } from '../composables/useTimer'
+import { useTaskStore } from '../stores/taskStore'
+
+const { timer, state, displayTime, progress, isRunning, modeLabel, phaseLabel } = useTimer()
+const taskStore = useTaskStore()
+const taskTitle = computed(() => taskStore.getTaskById(state.value.taskId)?.title ?? '暂未选择任务')
+
+function resetCurrent() {
+  if (['RUNNING', 'PAUSED'].includes(state.value.status)) timer.cancel()
+  if (state.value.mode === 'COUNTDOWN') timer.reset()
+  else timer.selectMode(state.value.mode)
 }
-function reset() { window.clearInterval(timer); running.value = false; seconds.value = 25 * 60 }
-onUnmounted(() => window.clearInterval(timer))
 </script>
 
 <template>
   <section class="mini-timer card">
-    <div class="section-heading"><div><span class="eyebrow">FOCUS NOW</span><h3>专注计时</h3></div><span class="live-pill"><i />番茄钟</span></div>
-    <div class="mini-clock"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="53"/><circle class="progress" cx="60" cy="60" r="53"/></svg><div><strong>{{ time }}</strong><span>保持专注</span></div></div>
-    <div class="current-task"><span>正在进行</span><strong>完成 Focus Day 首页视觉稿</strong></div>
-    <div class="timer-actions"><button class="timer-reset" @click="reset"><RotateCcw :size="17" /></button><button class="timer-play" @click="toggle"><component :is="running ? Pause : Play" :size="20" fill="currentColor" />{{ running ? '暂停' : '开始专注' }}</button></div>
+    <div class="section-heading"><div><span class="eyebrow">FOCUS NOW</span><h3>专注计时</h3></div><span class="live-pill"><i />{{state.mode==='POMODORO'?phaseLabel:modeLabel}}</span></div>
+    <div class="mini-clock"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="53"/><circle class="progress" cx="60" cy="60" r="53" :style="{strokeDashoffset:333-333*progress/100}"/></svg><div><strong>{{ displayTime }}</strong><span>{{isRunning?'保持专注':state.status==='PAUSED'?'已暂停':'准备开始'}}</span></div></div>
+    <div class="current-task"><span>当前任务</span><strong>{{taskTitle}}</strong></div>
+    <div class="timer-actions"><button class="timer-reset" title="重置计时" @click="resetCurrent"><RotateCcw :size="17" /></button><button class="timer-play" @click="timer.toggle()"><component :is="isRunning ? Pause : Play" :size="20" fill="currentColor" />{{ isRunning ? '暂停' : state.status==='PAUSED' ? '继续' : '开始专注' }}</button></div>
   </section>
 </template>

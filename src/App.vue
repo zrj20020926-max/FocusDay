@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { useTaskStore } from './stores/taskStore'
+import { useTimerStore } from './stores/timerStore'
 import AppSidebar from './components/AppSidebar.vue'
 import RightPanel from './components/RightPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
@@ -11,8 +12,10 @@ import { PanelRightOpen } from 'lucide-vue-next'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
+const timerStore = useTimerStore()
 const route = useRoute()
 void taskStore.initialize()
+timerStore.initialize()
 
 function onKeydown(e: KeyboardEvent) {
   if (e.repeat) return
