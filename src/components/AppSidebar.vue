@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { CalendarDays, CheckSquare2, Timer, ChartNoAxesCombined, Tags, Settings, Plus, Search, Sparkles } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
+import { useTaskStore } from '../stores/taskStore'
 const store = useAppStore()
+const taskStore = useTaskStore()
 const nav = [
   { to: '/', label: '今日', icon: CalendarDays },
   { to: '/tasks', label: '任务', icon: CheckSquare2 },
@@ -22,7 +24,7 @@ const nav = [
     </nav>
     <div class="nav-label">空间</div>
     <nav class="nav-section secondary-nav">
-      <a class="nav-item"><Tags :size="18" /><span>分类管理</span><span class="nav-count">5</span></a>
+      <router-link to="/categories" class="nav-item"><Tags :size="18" /><span>分类管理</span><span class="nav-count">{{taskStore.categories.length}}</span></router-link>
     </nav>
     <div class="sidebar-spacer" />
     <button class="search-hint" @click="store.commandOpen = true"><Search :size="16" /><span>快速搜索</span><kbd>⌘ K</kbd></button>

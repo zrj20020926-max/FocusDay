@@ -1,68 +1,110 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { X, CalendarDays, Flag, Tags, Clock3, AlignLeft, Check, Play, Pencil, Trash2, Save } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
+import { formatTaskDate, useTaskStore } from '../stores/taskStore'
+import { localDateKey, type TaskPriority, type TaskStatus } from '../types/task'
 
 const store = useAppStore()
+const taskStore = useTaskStore()
+const task = computed(() => taskStore.getTaskById(store.selectedTaskId))
+const category = computed(() => task.value ? taskStore.getCategoryById(task.value.categoryId) : undefined)
 const editing = ref(false)
 const confirmingDelete = ref(false)
 const draftTitle = ref('')
-const draftDue = ref('')
-const draftEstimate = ref(25)
+const draftDescription = ref('')
+const draftCategoryId = ref('other')
+const draftPriority = ref<TaskPriority>('MEDIUM')
+const draftStatus = ref<TaskStatus>('TODO')
+const draftPlannedDate = ref('')
+const draftDueDate = ref('')
+const draftDuration = ref(25)
+const draftPomodoros = ref(1)
 
-watch(() => store.selectedTaskId, () => {
-  if (!store.selectedTask) return
-  draftTitle.value = store.selectedTask.title
-  draftDue.value = store.selectedTask.due
-  draftEstimate.value = store.selectedTask.estimate
+function resetDraft() {
+  if (!task.value) return
+  draftTitle.value = task.value.title
+  draftDescription.value = task.value.description
+  draftCategoryId.value = task.value.categoryId
+  draftPriority.value = task.value.priority
+  draftStatus.value = task.value.status
+  draftPlannedDate.value = task.value.plannedDate ?? ''
+  draftDueDate.value = task.value.dueDate ?? ''
+  draftDuration.value = task.value.estimatedDuration
+  draftPomodoros.value = task.value.estimatedPomodoros
   editing.value = false
   confirmingDelete.value = false
-}, { immediate: true })
-
-function save() {
-  const task = store.selectedTask
-  if (!task || !draftTitle.value.trim()) return
-  store.updateTask(task.id, { title: draftTitle.value.trim(), due: draftDue.value.trim() || '今天', estimate: Math.max(1, draftEstimate.value || 1) })
-  editing.value = false
 }
 
-function remove() {
-  const task = store.selectedTask
-  if (!task) return
+watch([() => store.selectedTaskId, () => store.taskDrawerOpen], resetDraft, { immediate: true })
+
+async function save() {
+  if (!task.value) return
+  const saved = await taskStore.updateTask(task.value.id, {
+    title: draftTitle.value,
+    description: draftDescription.value,
+    categoryId: draftCategoryId.value,
+    priority: draftPriority.value,
+    status: draftStatus.value,
+    plannedDate: draftPlannedDate.value || null,
+    dueDate: draftDueDate.value || null,
+    estimatedDuration: Number(draftDuration.value),
+    estimatedPomodoros: Number(draftPomodoros.value),
+  })
+  if (saved) editing.value = false
+}
+
+async function remove() {
+  if (!task.value) return
   if (!confirmingDelete.value) { confirmingDelete.value = true; return }
-  store.deleteTask(task.id)
+  await taskStore.deleteTask(task.value.id)
+}
+
+function tomorrow(): string {
+  const date = new Date()
+  date.setDate(date.getDate() + 1)
+  return localDateKey(date)
 }
 </script>
 
 <template>
-  <Teleport to="body"><transition name="drawer"><div v-if="store.taskDrawerOpen" class="drawer-layer" @mousedown.self="store.taskDrawerOpen = false">
-    <aside class="task-drawer" v-if="store.selectedTask" role="dialog" aria-modal="true" aria-label="任务详情">
+  <Teleport to="body"><transition name="drawer"><div v-if="store.taskDrawerOpen" class="drawer-layer" @mousedown.self="store.closeTask()">
+    <aside class="task-drawer" v-if="task" role="dialog" aria-modal="true" aria-label="任务详情">
       <header>
-        <span class="drawer-status"><i />{{ store.selectedTask.completed ? '已完成' : '进行中' }}</span>
-        <div class="drawer-header-actions"><button class="icon-button" title="编辑任务" @click="editing = !editing; confirmingDelete = false"><Pencil :size="18" /></button><button class="icon-button" title="关闭" @click="store.taskDrawerOpen = false"><X :size="20" /></button></div>
+        <span class="drawer-status"><i />{{ task.status === 'COMPLETED' ? '已完成' : task.status === 'IN_PROGRESS' ? '进行中' : '待办' }}</span>
+        <div class="drawer-header-actions"><button class="icon-button" title="编辑任务" @click="editing = !editing; confirmingDelete = false"><Pencil :size="18" /></button><button class="icon-button" title="关闭" @click="store.closeTask()"><X :size="20" /></button></div>
       </header>
       <div class="drawer-body">
-        <button class="drawer-check" :class="{ checked: store.selectedTask.completed }" :aria-label="store.selectedTask.completed ? '恢复任务' : '完成任务'" @click="store.toggleTask(store.selectedTask.id)"><Check :size="18" /></button>
+        <button class="drawer-check" :class="{ checked: task.status === 'COMPLETED' }" :aria-label="task.status === 'COMPLETED' ? '恢复任务' : '完成任务'" @click="taskStore.toggleTask(task.id)"><Check :size="18" /></button>
         <template v-if="editing">
           <input v-model="draftTitle" class="drawer-title-input" aria-label="任务名称" @keyup.enter="save" />
-          <p class="drawer-project">Focus Day · 产品设计</p>
-          <div class="drawer-edit-grid"><label>截止日期<input v-model="draftDue" /></label><label>预计用时<span><input v-model.number="draftEstimate" type="number" min="1" />分钟</span></label></div>
+          <div class="drawer-edit-grid full-form">
+            <label>分类<select v-model="draftCategoryId"><option v-for="item in taskStore.categories" :key="item.id" :value="item.id">{{item.name}}</option></select></label>
+            <label>状态<select v-model="draftStatus"><option value="TODO">待办</option><option value="IN_PROGRESS">进行中</option><option value="COMPLETED">已完成</option></select></label>
+            <label>优先级<select v-model="draftPriority"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option></select></label>
+            <label>计划日期<input v-model="draftPlannedDate" type="date" /></label>
+            <label>截止日期<input v-model="draftDueDate" type="date" /></label>
+            <label>预计用时<span><input v-model.number="draftDuration" type="number" min="0" />分钟</span></label>
+            <label>预计番茄数<input v-model.number="draftPomodoros" type="number" min="0" /></label>
+          </div>
+          <label class="drawer-description-field">任务描述<textarea v-model="draftDescription" rows="4" placeholder="补充任务背景、目标或备注" /></label>
         </template>
-        <template v-else><h2>{{ store.selectedTask.title }}</h2><p class="drawer-project">Focus Day · 产品设计</p></template>
-        <div class="detail-grid">
-          <div><span><CalendarDays :size="16" />截止日期</span><strong>{{ store.selectedTask.due }}</strong></div>
-          <div><span><Flag :size="16" />优先级</span><strong class="priority">{{ store.selectedTask.priority === 'high' ? '高优先级' : store.selectedTask.priority === 'medium' ? '中优先级' : '低优先级' }}</strong></div>
-          <div><span><Tags :size="16" />分类</span><strong><i :style="{ background: store.selectedTask.color }" />{{ store.selectedTask.category }}</strong></div>
-          <div><span><Clock3 :size="16" />预计用时</span><strong>{{ store.selectedTask.estimate }} 分钟</strong></div>
+        <template v-else><h2>{{ task.title }}</h2><p class="drawer-project">{{ category?.name ?? '其他' }} · {{ task.status === 'IN_PROGRESS' ? '正在推进' : 'Focus Day' }}</p></template>
+        <div v-if="!editing" class="detail-grid">
+          <div><span><CalendarDays :size="16" />计划日期</span><strong>{{ formatTaskDate(task.plannedDate) }}</strong></div>
+          <div><span><CalendarDays :size="16" />截止日期</span><strong>{{ formatTaskDate(task.dueDate) }}</strong></div>
+          <div><span><Flag :size="16" />优先级</span><strong class="priority">{{ task.priority === 'HIGH' ? '高优先级' : task.priority === 'MEDIUM' ? '中优先级' : '低优先级' }}</strong></div>
+          <div><span><Tags :size="16" />分类</span><strong><i :style="{ background: category?.color }" />{{ category?.name ?? '其他' }}</strong></div>
+          <div><span><Clock3 :size="16" />预计用时</span><strong>{{ task.estimatedDuration }} 分钟</strong></div>
+          <div><span><Clock3 :size="16" />番茄钟</span><strong>{{ task.estimatedPomodoros }} 个</strong></div>
         </div>
-        <div class="notes"><span><AlignLeft :size="16" />备注</span><p>梳理核心场景与交互路径，完成高保真页面并检查响应式布局。保持克制、清晰，让每一次点击都有恰到好处的反馈。</p></div>
-        <div class="subtasks"><div class="section-heading"><h3>子任务</h3><span>2 / 3</span></div><label><input type="checkbox" checked />整理页面信息层级</label><label><input type="checkbox" checked />完成核心组件设计</label><label><input type="checkbox" />移动端适配检查</label></div>
+        <div v-if="!editing" class="notes"><span><AlignLeft :size="16" />备注</span><p>{{ task.description || '还没有添加任务描述。' }}</p></div>
       </div>
       <footer>
         <button class="delete-button" :class="{ confirming: confirmingDelete }" @click="remove"><Trash2 :size="16" />{{ confirmingDelete ? '再次点击确认删除' : '删除' }}</button>
         <span class="drawer-footer-spacer" />
         <button v-if="editing" class="primary-button" @click="save"><Save :size="17" />保存修改</button>
-        <template v-else><button class="secondary-button" @click="store.updateTask(store.selectedTask.id, { due: '明天' })">移到明天</button><button class="primary-button" @click="$router.push('/focus'); store.taskDrawerOpen=false"><Play :size="17" fill="currentColor"/>开始专注</button></template>
+        <template v-else><button class="secondary-button" @click="taskStore.updateTask(task.id, { plannedDate: tomorrow(), dueDate: tomorrow() })">移到明天</button><button class="primary-button" @click="$router.push('/focus'); store.taskDrawerOpen=false"><Play :size="17" fill="currentColor"/>开始专注</button></template>
       </footer>
     </aside>
   </div></transition></Teleport>

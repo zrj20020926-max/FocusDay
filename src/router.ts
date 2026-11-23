@@ -7,6 +7,7 @@ export default createRouter({
     { path: '/tasks', name: 'tasks', component: () => import('./views/TasksView.vue') },
     { path: '/focus', name: 'focus', component: () => import('./views/FocusView.vue') },
     { path: '/stats', name: 'stats', component: () => import('./views/StatsView.vue') },
+    { path: '/categories', name: 'categories', component: () => import('./views/CategoriesView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]

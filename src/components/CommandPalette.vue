@@ -3,10 +3,15 @@ import { ref, watch } from 'vue'
 import { Search, Plus, Timer, CheckSquare2, BarChart3, CornerDownLeft, Settings } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
-const store = useAppStore(); const router = useRouter(); const query = ref('')
+import { useTaskStore } from '../stores/taskStore'
+const store = useAppStore(); const taskStore = useTaskStore(); const router = useRouter(); const query = ref('')
 watch(() => store.commandOpen, open => { if (!open) query.value = '' })
 function go(path: string) { router.push(path); store.commandOpen = false }
-function submit() { if (query.value.trim()) { store.addTask(query.value); store.commandOpen = false } }
+async function submit() {
+  if (!query.value.trim()) return
+  const created = await taskStore.createTask({ title: query.value })
+  if (created) store.commandOpen = false
+}
 </script>
 
 <template>
