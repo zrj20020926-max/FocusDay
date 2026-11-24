@@ -74,8 +74,8 @@ function switchMode(next: Mode) {
           <span class="auth-cloud connected"><Cloud :size="25"/></span>
           <span class="eyebrow">CONNECTED</span>
           <h2>云端账户已连接</h2>
-          <p class="auth-card-copy">当前以 <strong>{{auth.user?.email}}</strong> 登录。现有本地数据不会自动上传。</p>
-          <div class="account-summary"><div class="avatar large">{{auth.displayName.slice(0,1)}}</div><span><strong>{{auth.displayName}}</strong><small>同步功能将在后续阶段开启</small></span></div>
+          <p class="auth-card-copy">当前以 <strong>{{auth.user?.email}}</strong> 登录。本地修改会在联网时安全同步。</p>
+          <div class="account-summary"><div class="avatar large">{{auth.displayName.slice(0,1)}}</div><span><strong>{{auth.displayName}}</strong><small>多设备同步已启用</small></span></div>
           <button class="auth-submit secondary" :disabled="auth.loading" @click="signOut"><LogOut :size="17"/>退出登录</button>
           <p v-if="notice" class="auth-message success">{{notice}}</p>
         </template>

@@ -13,6 +13,7 @@ export interface Database {
     Views: Record<string, never>
     Functions: {
       soft_delete_category: { Args: { category_to_delete: string; replacement_category: string }; Returns: boolean }
+      delete_current_user: { Args: Record<string, never>; Returns: boolean }
     }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>

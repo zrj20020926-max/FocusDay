@@ -7,6 +7,7 @@ import { getSupabaseClient } from '../supabase/client'
 import { SyncConflictResolver, type VersionedValue } from './SyncConflictResolver'
 import { SyncQueueService, syncQueueService } from './SyncQueueService'
 import { SyncStatusService, syncStatusService } from './SyncStatusService'
+import { toUserMessage } from '../errors/userMessage'
 
 type Client = SupabaseClient<any>
 type RemoteRow = Record<string, any> & { id: string; version: number; updated_at: string; deleted_at: string | null }
@@ -28,12 +29,12 @@ export class SyncService {
     private readonly queue: SyncQueueService = syncQueueService,
     private readonly status: SyncStatusService = syncStatusService,
     private readonly clientFactory: () => Promise<Client> = getSupabaseClient as () => Promise<Client>,
+    private readonly timeoutMs = 20_000,
   ) { this.conflicts = new SyncConflictResolver(database) }
 
   syncNow(): Promise<void> {
-    if (this.running) return this.running
-    this.running = this.perform().finally(() => { this.running = null })
-    return this.running
+    if (!this.running) this.running = this.perform().finally(() => { this.running = null })
+    return this.withTimeout(this.running)
   }
 
   private async perform(): Promise<void> {
@@ -54,7 +55,7 @@ export class SyncService {
       await this.refreshStatus('SYNCED', now)
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('focus-day:data-synced'))
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = toUserMessage(error, '同步失败，本地数据已安全保留')
       const conflicts = await this.database.db.syncQueue.where('status').equals('CONFLICT').count().catch(() => 0)
       this.status.update({ status: conflicts ? 'CONFLICT' : 'ERROR', lastError: message, conflicts })
       throw error
@@ -351,6 +352,16 @@ export class SyncService {
     const conflicts = await this.database.db.syncQueue.where('status').equals('CONFLICT').count()
     this.status.update({ status: conflicts ? 'CONFLICT' : pendingCount ? 'PENDING' : preferred ?? 'SYNCED', pendingCount, conflicts,
       lastSyncedAt: lastSyncedAt ?? this.status.getSnapshot().lastSyncedAt, lastError: null })
+  }
+  private withTimeout(operation: Promise<void>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const error = new SyncError('云端响应超时，本地数据已安全保留，请稍后重试', 'NETWORK')
+        this.status.setStatus('ERROR', error.message)
+        reject(error)
+      }, this.timeoutMs)
+      operation.then(value => { clearTimeout(timer); resolve(value) }, error => { clearTimeout(timer); reject(error) })
+    })
   }
 }
 

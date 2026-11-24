@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import type { Session, User } from '@supabase/supabase-js'
 import { AuthService, type AuthSubscription } from '../services/auth/AuthService'
 import { getSupabaseClient, isSupabaseConfigured } from '../services/supabase/client'
+import { accountService } from '../services/account/AccountService'
+import { toUserMessage } from '../services/errors/userMessage'
 
 let service: AuthService | null = null
 let subscription: AuthSubscription | null = null
@@ -19,7 +21,7 @@ function messageOf(error: unknown): string {
   if (/email not confirmed/i.test(message)) return '请先完成邮箱验证'
   if (/user already registered/i.test(message)) return '该邮箱已经注册'
   if (/rate limit/i.test(message)) return '请求过于频繁，请稍后再试'
-  return message
+  return toUserMessage(error, '认证服务暂时不可用，请稍后重试')
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -67,6 +69,9 @@ export const useAuthStore = defineStore('auth', {
     },
     async signOut() {
       return this.perform(async () => { await (await authService()).signOut(); this.applySession(null); return true })
+    },
+    async deleteAccount() {
+      return this.perform(async () => { await accountService.deleteCurrentAccount(); this.applySession(null); return true })
     },
     async requestPasswordReset(email: string) {
       return this.perform(async () => { await (await authService()).requestPasswordReset(email); return true })

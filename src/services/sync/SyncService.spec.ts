@@ -145,4 +145,16 @@ describe('SyncService', () => {
     expect(cloud.tables.timer_states[0].id).toBe(remoteId)
     expect((await db.db.syncConflicts.toArray())[0]?.reason).toBe('SIMULTANEOUS_TIMER')
   })
+
+  it('云端请求超时不会重复启动同步且保留清晰错误状态', async () => {
+    const db = new DatabaseService(`sync-timeout-${crypto.randomUUID()}`); databases.push(db)
+    let calls = 0
+    const pendingClient = () => { calls += 1; return new Promise<any>(() => undefined) }
+    const status = new SyncStatusService()
+    const service = new SyncService(db, new SyncQueueService(db), status, pendingClient, 5)
+    const results = await Promise.allSettled([service.syncNow(), service.syncNow()])
+    expect(results.every(result => result.status === 'rejected')).toBe(true)
+    expect(calls).toBe(1)
+    expect(status.getSnapshot()).toMatchObject({ status: 'ERROR', lastError: expect.stringContaining('超时') })
+  })
 })
