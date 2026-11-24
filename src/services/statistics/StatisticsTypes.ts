@@ -130,3 +130,41 @@ export interface FocusDistributionData {
   records: StatisticsFocusRecord[]
   empty: boolean
 }
+
+export type StatisticsReportType = 'WEEK' | 'MONTH'
+
+export interface StatisticsReportTask {
+  id: string
+  title: string
+  categoryName: string
+  categoryColor: string
+  focusDuration: number
+  completedAt: string | null
+}
+
+export interface StatisticsReportData {
+  type: StatisticsReportType
+  periodLabel: string
+  previousPeriodLabel: string
+  start: number
+  end: number
+  startKey: string
+  endKey: string
+  focusDuration: number
+  previousFocusDuration: number
+  comparisonRate: number | null
+  completedTasks: number
+  focusedDays: number
+  longestStreak: number
+  goalDuration: number
+  goalAchievementRate: number
+  goalMet: boolean
+  bestDay: DailyFocusPoint | null
+  topCategory: CategoryFocusMetric | null
+  daily: DailyFocusPoint[]
+  categories: CategoryFocusMetric[]
+  summaries: string[]
+  sourceTasks: StatisticsReportTask[]
+  records: StatisticsFocusRecord[]
+  empty: boolean
+}

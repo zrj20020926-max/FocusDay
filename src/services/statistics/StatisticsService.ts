@@ -1,10 +1,11 @@
-import type { FocusSessionRecord } from '../../types/database'
+import type { CategoryRecord, FocusSessionRecord, TaskRecord } from '../../types/database'
 import type { FocusSession } from '../../types/focusSession'
 import type { Task, TaskCategory } from '../../types/task'
 import { DatabaseService, databaseService } from '../database/DatabaseService'
 import { syncQueueService, type SyncQueueService } from '../sync/SyncQueueService'
 import { addCalendarDays, dateKeyAt, rangeForDateKey, splitSessionByDay, startOfDateKey, StatisticsCalculator, weekStartKey } from './StatisticsCalculator'
-import type { DailyFocusPoint, FocusDistributionData, FocusHeatmapRange, StatisticsDashboard, StatisticsFocusRecord, StatisticsOptions, StatisticsPageData, StatisticsRange, StatisticsTrendPoint } from './StatisticsTypes'
+import { StatisticsReportCalculator } from './StatisticsReportCalculator'
+import type { DailyFocusPoint, FocusDistributionData, FocusHeatmapRange, StatisticsDashboard, StatisticsFocusRecord, StatisticsOptions, StatisticsPageData, StatisticsRange, StatisticsReportData, StatisticsReportType, StatisticsTrendPoint } from './StatisticsTypes'
 import { DEFAULT_DAILY_FOCUS_GOAL } from './StatisticsTypes'
 
 const sessionFromRecord = (record: FocusSessionRecord): FocusSession => {
@@ -15,6 +16,7 @@ const sessionFromRecord = (record: FocusSessionRecord): FocusSession => {
 export class StatisticsService {
   private revision = 0
   private cache: { key: string; revision: number; value: StatisticsDashboard } | null = null
+  private snapshot: { revision: number; promise: Promise<{ taskRecords: TaskRecord[]; categoryRecords: CategoryRecord[]; sessionRecords: FocusSessionRecord[] }> } | null = null
   private readonly unsubscribeQueue: () => void
   private readonly dataListener = () => this.invalidate()
 
@@ -23,7 +25,7 @@ export class StatisticsService {
     if (typeof window !== 'undefined') window.addEventListener('focus-day:data-synced', this.dataListener)
   }
 
-  invalidate(): void { this.revision += 1; this.cache = null }
+  invalidate(): void { this.revision += 1; this.cache = null; this.snapshot = null }
   dispose(): void {
     this.unsubscribeQueue()
     if (typeof window !== 'undefined') window.removeEventListener('focus-day:data-synced', this.dataListener)
@@ -36,10 +38,7 @@ export class StatisticsService {
     const goal = options.dailyGoalDuration ?? await this.readDailyGoal()
     const cacheKey = `${timeZone}:${dateKeyAt(now, timeZone)}:${goal}`
     if (this.cache?.key === cacheKey && this.cache.revision === this.revision) return structuredClone(this.cache.value)
-    const [taskRecords, categoryRecords, sessionRecords] = await this.database.db.transaction('r',
-      [this.database.db.tasks, this.database.db.categories, this.database.db.focusSessions], () => Promise.all([
-        this.database.db.tasks.toArray(), this.database.db.categories.toArray(), this.database.db.focusSessions.toArray(),
-      ]))
+    const { taskRecords, categoryRecords, sessionRecords } = await this.readSnapshot()
     const allTasks = taskRecords.map(({ deletedAt: _, syncStatus: _s, version: _v, ...task }) => task as Task)
     const activeTasks = taskRecords.filter(record => !record.deletedAt).map(({ deletedAt: _, syncStatus: _s, version: _v, ...task }) => task as Task)
     const categories = categoryRecords.map(({ deletedAt: _, syncStatus: _s, version: _v, ...category }) => category as TaskCategory)
@@ -63,9 +62,9 @@ export class StatisticsService {
     const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
     const todayKey = dateKeyAt(now, timeZone)
     const tomorrowKey = addCalendarDays(todayKey, 1)
-    const [allSessionRecords, taskRecords, categoryRecords] = await Promise.all([
-      this.database.db.focusSessions.filter(record => !record.deletedAt).toArray(), this.database.db.tasks.toArray(), this.database.db.categories.toArray(),
-    ])
+    const snapshot = await this.readSnapshot()
+    const allSessionRecords = snapshot.sessionRecords.filter(record => !record.deletedAt)
+    const { taskRecords, categoryRecords } = snapshot
     const earliestKey = [
       ...allSessionRecords.filter(record => record.status === 'COMPLETED').map(record => dateKeyAt(record.startTime, timeZone)),
       ...taskRecords.filter(record => !record.deletedAt).map(record => dateKeyAt(Date.parse(record.completedAt ?? record.createdAt), timeZone)),
@@ -112,9 +111,9 @@ export class StatisticsService {
     const endKey = range === 'RECENT_90' || selectedYear === currentYear ? addCalendarDays(todayKey, 1) : `${selectedYear + 1}-01-01`
     const start = startOfDateKey(startKey, timeZone)
     const end = startOfDateKey(endKey, timeZone)
-    const [sessionRecords, taskRecords, categoryRecords] = await Promise.all([
-      this.database.db.focusSessions.filter(record => !record.deletedAt).toArray(), this.database.db.tasks.toArray(), this.database.db.categories.toArray(),
-    ])
+    const snapshot = await this.readSnapshot()
+    const sessionRecords = snapshot.sessionRecords.filter(record => !record.deletedAt)
+    const { taskRecords, categoryRecords } = snapshot
     const allSessions = sessionRecords.map(sessionFromRecord)
     const selectedSessions = allSessions.filter(session => session.endTime > start && session.startTime < end)
     const daily = StatisticsCalculator.dailySeries(selectedSessions, startKey, endKey, timeZone)
@@ -132,6 +131,27 @@ export class StatisticsService {
       records: this.buildRecords(selectedSessions, allTasks, categories, timeZone),
       empty: !daily.some(item => item.duration > 0),
     }
+  }
+
+  async getReport(type: StatisticsReportType, anchor = Date.now(), options: StatisticsOptions = {}): Promise<StatisticsReportData> {
+    await this.database.initialize()
+    const now = options.now ?? Date.now()
+    const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
+    const anchorKey = dateKeyAt(anchor, timeZone)
+    const queryStart = startOfDateKey(addCalendarDays(anchorKey, -75), timeZone)
+    const queryEnd = startOfDateKey(addCalendarDays(anchorKey, 40), timeZone)
+    const [sessionRecords, taskRecords, categoryRecords, goal] = await Promise.all([
+      this.database.db.focusSessions.where('endTime').above(queryStart).filter(record => !record.deletedAt && record.startTime < queryEnd).toArray(),
+      this.database.db.tasks.toArray(), this.database.db.categories.toArray(), options.dailyGoalDuration ?? this.readDailyGoal(),
+    ])
+    const allTasks = taskRecords.map(({ deletedAt: _, syncStatus: _s, version: _v, ...task }) => task as Task)
+    const activeTasks = taskRecords.filter(record => !record.deletedAt).map(({ deletedAt: _, syncStatus: _s, version: _v, ...task }) => task as Task)
+    const categories = categoryRecords.map(({ deletedAt: _, syncStatus: _s, version: _v, ...category }) => category as TaskCategory)
+    const sessions = sessionRecords.map(sessionFromRecord)
+    const calculated = StatisticsReportCalculator.calculate({ tasks: activeTasks, historicalTasks: allTasks, categories, sessions },
+      { type, anchor, ...options, now, timeZone, dailyGoalDuration: goal })
+    const currentSessions = sessions.filter(session => session.endTime > calculated.start && session.startTime < calculated.end)
+    return { ...calculated, records: this.buildRecords(currentSessions, allTasks, categories, timeZone) }
   }
 
   private buildTrend(range: StatisticsRange, daily: DailyFocusPoint[], completedByDate: Map<string, number>, timeZone: string): StatisticsTrendPoint[] {
@@ -155,6 +175,19 @@ export class StatisticsService {
       months.set(key, current)
     }
     return [...months.values()]
+  }
+
+  private readSnapshot(): Promise<{ taskRecords: TaskRecord[]; categoryRecords: CategoryRecord[]; sessionRecords: FocusSessionRecord[] }> {
+    if (this.snapshot?.revision === this.revision) return this.snapshot.promise
+    const snapshotRevision = this.revision
+    const loading = this.database.db.transaction('r', [this.database.db.tasks, this.database.db.categories, this.database.db.focusSessions], async () => ({
+      taskRecords: await this.database.db.tasks.toArray(),
+      categoryRecords: await this.database.db.categories.toArray(),
+      sessionRecords: await this.database.db.focusSessions.toArray(),
+    }))
+    const promise = loading.catch(error => { if (this.snapshot?.revision === snapshotRevision) this.snapshot = null; throw error })
+    this.snapshot = { revision: this.revision, promise }
+    return promise
   }
 
   private buildRecords(sessions: FocusSession[], tasks: Task[], categories: TaskCategory[], timeZone: string): StatisticsFocusRecord[] {

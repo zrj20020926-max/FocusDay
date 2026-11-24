@@ -43,6 +43,12 @@ describe('StatisticsService', () => {
     expect(distribution.heatmap).toHaveLength(73)
     expect(distribution.heatmap.find(item => item.date === '2024-03-13')).toMatchObject({ duration: 3_600_000, level: 3, focusCount: 1 })
     expect(distribution.records[0]).toMatchObject({ taskTitle: '完成', date: '2024-03-13' })
+    const report = await service.getReport('WEEK', Date.parse('2024-03-13T12:00:00Z'),
+      { now: Date.parse('2024-03-13T12:00:00Z'), timeZone: 'UTC' })
+    expect(report).toMatchObject({ type: 'WEEK', startKey: '2024-03-11', endKey: '2024-03-18',
+      focusDuration: 3_600_000, completedTasks: 1, focusedDays: 1, longestStreak: 1, empty: false })
+    expect(report.sourceTasks[0]).toMatchObject({ id: 'task', title: '完成', focusDuration: 3_600_000 })
+    expect(report.records[0]).toMatchObject({ id: 'focus', taskTitle: '完成' })
     service.dispose()
   })
 

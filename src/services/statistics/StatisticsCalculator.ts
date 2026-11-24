@@ -90,7 +90,7 @@ export function weekStartKey(dateKey: string): string {
 
 function monthStartKey(dateKey: string): string { return `${dateKey.slice(0, 7)}-01` }
 
-function deduplicate(sessions: StatisticsFocusSession[]): StatisticsFocusSession[] {
+export function normalizeStatisticsSessions(sessions: StatisticsFocusSession[]): StatisticsFocusSession[] {
   const values = new Map<string, StatisticsFocusSession>()
   for (const session of sessions) {
     const key = session.sourceRecordId ? `source:${session.sourceRecordId}` : `id:${session.id}`
@@ -179,7 +179,7 @@ export function splitSessionByHour(session: StatisticsFocusSession, startTime = 
   return result
 }
 
-function normalizedSessions(sessions: StatisticsFocusSession[]) { return deduplicate(sessions) }
+function normalizedSessions(sessions: StatisticsFocusSession[]) { return normalizeStatisticsSessions(sessions) }
 
 function durationMap(sessions: StatisticsFocusSession[], timeZone: string): Map<string, number> {
   const output = new Map<string, number>()
@@ -261,13 +261,22 @@ export class StatisticsCalculator {
 
   static dailySeries(sessions: StatisticsFocusSession[], startKey: string, endKeyExclusive: string, timeZone = resolvedTimeZone()): DailyFocusPoint[] {
     const valid = normalizedSessions(sessions)
-    const durations = durationMap(valid, timeZone)
+    const durations = new Map<string, number>()
+    const focusCounts = new Map<string, number>()
+    const pomodoros = new Map<string, number>()
+    for (const session of valid) {
+      for (const [key, duration] of splitSessionByDay(session, timeZone)) {
+        if (duration <= 0) continue
+        durations.set(key, (durations.get(key) ?? 0) + duration)
+        focusCounts.set(key, (focusCounts.get(key) ?? 0) + 1)
+      }
+      const completedKey = dateKeyAt(session.endTime, timeZone)
+      pomodoros.set(completedKey, (pomodoros.get(completedKey) ?? 0) + session.completedPomodoros)
+    }
     const output: DailyFocusPoint[] = []
     for (let key = startKey; key < endKeyExclusive; key = addCalendarDays(key, 1)) {
-      const daySessions = valid.filter(session => splitSessionByDay(session, timeZone).has(key))
-      output.push({ date: key, duration: durations.get(key) ?? 0, focusCount: daySessions.length,
-        completedPomodoros: valid.filter(session => dateKeyAt(session.endTime, timeZone) === key)
-          .reduce((sum, session) => sum + session.completedPomodoros, 0) })
+      output.push({ date: key, duration: durations.get(key) ?? 0, focusCount: focusCounts.get(key) ?? 0,
+        completedPomodoros: pomodoros.get(key) ?? 0 })
     }
     return output
   }

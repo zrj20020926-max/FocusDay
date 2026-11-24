@@ -8,9 +8,10 @@ import FocusStreakCard from '../components/statistics/FocusStreakCard.vue'
 import HourlyFocusChart from '../components/statistics/HourlyFocusChart.vue'
 import StatisticsRangeTabs from '../components/statistics/StatisticsRangeTabs.vue'
 import StatisticsRecordList from '../components/statistics/StatisticsRecordList.vue'
+import StatisticsReport from '../components/statistics/StatisticsReport.vue'
 import TaskCompletionChart from '../components/statistics/TaskCompletionChart.vue'
 import { statisticsService } from '../services/statistics/StatisticsService'
-import type { CategoryFocusMetric, FocusDistributionData, FocusHeatmapDay, FocusHeatmapRange, StatisticsPageData, StatisticsRange, StatisticsTrendPoint } from '../services/statistics/StatisticsTypes'
+import type { CategoryFocusMetric, FocusDistributionData, FocusHeatmapDay, FocusHeatmapRange, StatisticsPageData, StatisticsRange, StatisticsReportData, StatisticsReportType, StatisticsTrendPoint } from '../services/statistics/StatisticsTypes'
 
 type DetailFilter = { type: 'date'; point: StatisticsTrendPoint } | { type: 'category'; item: CategoryFocusMetric } | { type: 'heatmap'; date: string }
 
@@ -24,8 +25,14 @@ const heatmapYear = ref(new Date().getFullYear())
 const distribution = ref<FocusDistributionData | null>(null)
 const distributionLoading = ref(true)
 const distributionError = ref('')
+const reportType = ref<StatisticsReportType>('WEEK')
+const reportAnchor = ref(Date.now())
+const report = ref<StatisticsReportData | null>(null)
+const reportLoading = ref(true)
+const reportError = ref('')
 let requestId = 0
 let distributionRequestId = 0
+let reportRequestId = 0
 
 const durationLabel = (duration: number) => {
   const hours = Math.floor(duration / 3_600_000)
@@ -46,6 +53,7 @@ const selectedRecords = computed(() => {
 const detailTitle = computed(() => detail.value?.type === 'date' ? `${detail.value.point.label}的专注记录`
   : detail.value?.type === 'category' ? `${detail.value.item.name}分类记录` : detail.value ? `${detail.value.date} 的专注记录` : '')
 const peakHourLabel = computed(() => distribution.value?.peakHour == null ? '暂无' : `${String(distribution.value.peakHour).padStart(2, '0')}:00`)
+const canNextReport = computed(() => Boolean(report.value && report.value.end <= Date.now()))
 
 async function load() {
   const current = ++requestId
@@ -69,16 +77,31 @@ async function loadDistribution() {
     if (current === distributionRequestId) distributionError.value = '专注分布暂时无法读取，请稍后重试'
   } finally { if (current === distributionRequestId) distributionLoading.value = false }
 }
+async function loadReport() {
+  const current = ++reportRequestId
+  reportLoading.value = true
+  reportError.value = ''
+  try {
+    const result = await statisticsService.getReport(reportType.value, reportAnchor.value)
+    if (current === reportRequestId) report.value = result
+  } catch {
+    if (current === reportRequestId) reportError.value = '专注报告暂时无法生成，请稍后重试'
+  } finally { if (current === reportRequestId) reportLoading.value = false }
+}
 function selectDate(point: StatisticsTrendPoint) { detail.value = { type: 'date', point } }
 function selectCategory(item: CategoryFocusMetric) { detail.value = { type: 'category', item } }
 function selectHeatmapDay(day: FocusHeatmapDay) { detail.value = { type: 'heatmap', date: day.date } }
 function setHeatmapRange(value: FocusHeatmapRange) { if (heatmapRange.value !== value) heatmapRange.value = value }
 function changeHeatmapYear(delta: number) { heatmapYear.value = Math.min(new Date().getFullYear(), heatmapYear.value + delta) }
-function onDataSynced() { statisticsService.invalidate(); void load(); void loadDistribution() }
+function changeReportType(type: StatisticsReportType) { if (reportType.value === type) return; reportType.value = type; reportAnchor.value = Date.now() }
+function previousReport() { if (report.value) reportAnchor.value = report.value.start - 1 }
+function nextReport() { if (report.value && canNextReport.value) reportAnchor.value = report.value.end + 1 }
+function onDataSynced() { statisticsService.invalidate(); void load(); void loadDistribution(); void loadReport() }
 
 watch(range, () => { detail.value = null; void load() })
 watch([heatmapRange, heatmapYear], () => { detail.value = null; void loadDistribution() })
-onMounted(() => { window.addEventListener('focus-day:data-synced', onDataSynced); void load(); void loadDistribution() })
+watch([reportType, reportAnchor], () => void loadReport())
+onMounted(() => { window.addEventListener('focus-day:data-synced', onDataSynced); void load(); void loadDistribution(); void loadReport() })
 onUnmounted(() => window.removeEventListener('focus-day:data-synced', onDataSynced))
 </script>
 
@@ -132,6 +155,11 @@ onUnmounted(() => window.removeEventListener('focus-day:data-synced', onDataSync
             <div class="rhythm-mark"><Flame :size="22"/></div><div><span class="card-kicker">CURRENT RHYTHM</span><h2>{{ data.focusStreakDays ? `已连续专注 ${data.focusStreakDays} 天` : '从今天开始积累节奏' }}</h2><p>{{ data.focusStreakDays ? '持续并不意味着用力过猛，稳定地回来就很好。' : '一次短暂但完整的专注，也值得被记录。' }}</p></div>
           </article>
         </section>
+
+        <div v-if="reportError" class="stats-error report-error"><Info :size="17"/><span>{{ reportError }}</span><button @click="loadReport"><RefreshCw :size="14"/>重新生成</button></div>
+        <div v-if="reportLoading && !report" class="report-loading"><div/><div/><div/></div>
+        <StatisticsReport v-else-if="report" :report="report" :loading="reportLoading" :can-next="canNextReport"
+          @change-type="changeReportType" @previous="previousReport" @next="nextReport"/>
 
         <section class="distribution-section">
           <div class="distribution-intro"><div><span class="eyebrow">FOCUS RHYTHM</span><h2>时间分布</h2><p>从一年中的坚持，到一天里的高效时刻。</p></div></div>
