@@ -1,22 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { CalendarDays, CheckCircle2, Clock3, Flame, Info, RefreshCw, Target, TimerReset, TrendingUp } from 'lucide-vue-next'
+import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Flame, Info, RefreshCw, Target, TimerReset, TrendingUp } from 'lucide-vue-next'
 import CategoryDonutChart from '../components/statistics/CategoryDonutChart.vue'
 import FocusTrendChart from '../components/statistics/FocusTrendChart.vue'
+import FocusHeatmap from '../components/statistics/FocusHeatmap.vue'
+import FocusStreakCard from '../components/statistics/FocusStreakCard.vue'
+import HourlyFocusChart from '../components/statistics/HourlyFocusChart.vue'
 import StatisticsRangeTabs from '../components/statistics/StatisticsRangeTabs.vue'
 import StatisticsRecordList from '../components/statistics/StatisticsRecordList.vue'
 import TaskCompletionChart from '../components/statistics/TaskCompletionChart.vue'
 import { statisticsService } from '../services/statistics/StatisticsService'
-import type { CategoryFocusMetric, StatisticsPageData, StatisticsRange, StatisticsTrendPoint } from '../services/statistics/StatisticsTypes'
+import type { CategoryFocusMetric, FocusDistributionData, FocusHeatmapDay, FocusHeatmapRange, StatisticsPageData, StatisticsRange, StatisticsTrendPoint } from '../services/statistics/StatisticsTypes'
 
-type DetailFilter = { type: 'date'; point: StatisticsTrendPoint } | { type: 'category'; item: CategoryFocusMetric }
+type DetailFilter = { type: 'date'; point: StatisticsTrendPoint } | { type: 'category'; item: CategoryFocusMetric } | { type: 'heatmap'; date: string }
 
 const range = ref<StatisticsRange>('WEEK')
 const data = ref<StatisticsPageData | null>(null)
 const loading = ref(true)
 const error = ref('')
 const detail = ref<DetailFilter | null>(null)
+const heatmapRange = ref<FocusHeatmapRange>('YEAR')
+const heatmapYear = ref(new Date().getFullYear())
+const distribution = ref<FocusDistributionData | null>(null)
+const distributionLoading = ref(true)
+const distributionError = ref('')
 let requestId = 0
+let distributionRequestId = 0
 
 const durationLabel = (duration: number) => {
   const hours = Math.floor(duration / 3_600_000)
@@ -26,13 +35,17 @@ const durationLabel = (duration: number) => {
 const trendTitle = computed(() => range.value === 'TODAY' ? '今日专注' : range.value === 'WEEK' ? '本周每日趋势' : range.value === 'MONTH' ? '本月每日趋势' : '月度专注趋势')
 const selectedRecords = computed(() => {
   const selectedDetail = detail.value
-  if (!data.value || !selectedDetail) return []
+  if (!selectedDetail) return []
+  if (selectedDetail.type === 'heatmap') return distribution.value?.records.filter(record => record.dates.includes(selectedDetail.date)) ?? []
+  if (!data.value) return []
   if (selectedDetail.type === 'date') return data.value.records.filter(record => range.value === 'ALL'
     ? record.dates.some(date => date.startsWith(selectedDetail.point.key)) : record.dates.includes(selectedDetail.point.key))
   const selected = selectedDetail.item
   return data.value.records.filter(record => record.categoryId === selected.categoryId && record.categoryName === selected.name)
 })
-const detailTitle = computed(() => detail.value?.type === 'date' ? `${detail.value.point.label}的专注记录` : detail.value ? `${detail.value.item.name}分类记录` : '')
+const detailTitle = computed(() => detail.value?.type === 'date' ? `${detail.value.point.label}的专注记录`
+  : detail.value?.type === 'category' ? `${detail.value.item.name}分类记录` : detail.value ? `${detail.value.date} 的专注记录` : '')
+const peakHourLabel = computed(() => distribution.value?.peakHour == null ? '暂无' : `${String(distribution.value.peakHour).padStart(2, '0')}:00`)
 
 async function load() {
   const current = ++requestId
@@ -45,12 +58,27 @@ async function load() {
     if (current === requestId) error.value = '统计数据暂时无法读取，请稍后重试'
   } finally { if (current === requestId) loading.value = false }
 }
+async function loadDistribution() {
+  const current = ++distributionRequestId
+  distributionLoading.value = true
+  distributionError.value = ''
+  try {
+    const result = await statisticsService.getFocusDistribution(heatmapRange.value, heatmapYear.value)
+    if (current === distributionRequestId) { distribution.value = result; heatmapYear.value = result.year }
+  } catch {
+    if (current === distributionRequestId) distributionError.value = '专注分布暂时无法读取，请稍后重试'
+  } finally { if (current === distributionRequestId) distributionLoading.value = false }
+}
 function selectDate(point: StatisticsTrendPoint) { detail.value = { type: 'date', point } }
 function selectCategory(item: CategoryFocusMetric) { detail.value = { type: 'category', item } }
-function onDataSynced() { statisticsService.invalidate(); void load() }
+function selectHeatmapDay(day: FocusHeatmapDay) { detail.value = { type: 'heatmap', date: day.date } }
+function setHeatmapRange(value: FocusHeatmapRange) { if (heatmapRange.value !== value) heatmapRange.value = value }
+function changeHeatmapYear(delta: number) { heatmapYear.value = Math.min(new Date().getFullYear(), heatmapYear.value + delta) }
+function onDataSynced() { statisticsService.invalidate(); void load(); void loadDistribution() }
 
 watch(range, () => { detail.value = null; void load() })
-onMounted(() => { window.addEventListener('focus-day:data-synced', onDataSynced); void load() })
+watch([heatmapRange, heatmapYear], () => { detail.value = null; void loadDistribution() })
+onMounted(() => { window.addEventListener('focus-day:data-synced', onDataSynced); void load(); void loadDistribution() })
 onUnmounted(() => window.removeEventListener('focus-day:data-synced', onDataSynced))
 </script>
 
@@ -103,6 +131,36 @@ onUnmounted(() => window.removeEventListener('focus-day:data-synced', onDataSync
           <article class="analytics-card rhythm-card">
             <div class="rhythm-mark"><Flame :size="22"/></div><div><span class="card-kicker">CURRENT RHYTHM</span><h2>{{ data.focusStreakDays ? `已连续专注 ${data.focusStreakDays} 天` : '从今天开始积累节奏' }}</h2><p>{{ data.focusStreakDays ? '持续并不意味着用力过猛，稳定地回来就很好。' : '一次短暂但完整的专注，也值得被记录。' }}</p></div>
           </article>
+        </section>
+
+        <section class="distribution-section">
+          <div class="distribution-intro"><div><span class="eyebrow">FOCUS RHYTHM</span><h2>时间分布</h2><p>从一年中的坚持，到一天里的高效时刻。</p></div></div>
+          <div v-if="distributionError" class="stats-error compact"><Info :size="17"/><span>{{ distributionError }}</span><button @click="loadDistribution"><RefreshCw :size="14"/>重试</button></div>
+          <div v-if="distributionLoading && !distribution" class="distribution-skeleton"><div/><div/><div/></div>
+          <div v-else-if="distribution" class="distribution-grid" :class="{ refreshing: distributionLoading }">
+            <article class="analytics-card heatmap-analysis-card">
+              <header class="analytics-card-heading heatmap-heading">
+                <div><span class="card-kicker"><CalendarDays :size="14"/>FOCUS MAP</span><h2>{{ heatmapRange === 'YEAR' ? `${distribution.year} 年专注热力图` : '最近 90 天专注热力图' }}</h2><p>每个格子代表一天，点击查看当天的专注记录</p></div>
+                <div class="heatmap-controls">
+                  <div class="heatmap-range-switch"><button :class="{ active: heatmapRange === 'YEAR' }" @click="setHeatmapRange('YEAR')">年度</button><button :class="{ active: heatmapRange === 'RECENT_90' }" @click="setHeatmapRange('RECENT_90')">最近 90 天</button></div>
+                  <div v-if="heatmapRange === 'YEAR'" class="year-switcher"><button aria-label="上一年" @click="changeHeatmapYear(-1)"><ChevronLeft :size="16"/></button><strong>{{ heatmapYear }}</strong><button aria-label="下一年" :disabled="heatmapYear >= new Date().getFullYear()" @click="changeHeatmapYear(1)"><ChevronRight :size="16"/></button></div>
+                </div>
+              </header>
+              <FocusHeatmap :days="distribution.heatmap" :empty="distribution.empty" @select="selectHeatmapDay"/>
+            </article>
+
+            <article class="analytics-card hourly-analysis-card">
+              <header class="analytics-card-heading"><div><span class="card-kicker"><Clock3 :size="14"/>DAILY CLOCK</span><h2>24 小时专注分布</h2><p>按有效专注时间与每个小时区间的交集计算</p></div><strong>{{ peakHourLabel }}<small>专注高峰</small></strong></header>
+              <HourlyFocusChart v-if="!distribution.empty" :points="distribution.hourly"/>
+              <div v-else class="chart-empty hourly-empty"><strong>暂无时段分布</strong><p>专注记录会按实际经过的小时拆分，而不是只看开始时间。</p></div>
+              <div class="daypart-summary">
+                <div><span>上午</span><strong>{{ durationLabel(distribution.morningDuration) }}</strong><small>00:00–12:00</small></div>
+                <div><span>下午</span><strong>{{ durationLabel(distribution.afternoonDuration) }}</strong><small>12:00–18:00</small></div>
+                <div><span>晚间</span><strong>{{ durationLabel(distribution.eveningDuration) }}</strong><small>18:00–24:00</small></div>
+              </div>
+            </article>
+            <FocusStreakCard :metric="distribution.streak"/>
+          </div>
         </section>
 
         <transition name="record-panel"><StatisticsRecordList v-if="detail" :title="detailTitle" :records="selectedRecords" @close="detail = null"/></transition>

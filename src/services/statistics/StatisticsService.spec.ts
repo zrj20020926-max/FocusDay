@@ -36,6 +36,13 @@ describe('StatisticsService', () => {
       totalTasks: 1, totalCompletedTasks: 1, taskCompletionRate: 1, empty: false })
     expect(page.categories[0]).toMatchObject({ name: '工作', duration: 3_600_000 })
     expect(page.records[0]).toMatchObject({ taskTitle: '完成', dates: ['2024-03-13'] })
+    const distribution = await service.getFocusDistribution('YEAR', 2024, { now: Date.parse('2024-03-13T12:00:00Z'), timeZone: 'UTC' })
+    expect(distribution).toMatchObject({ range: 'YEAR', year: 2024, startKey: '2024-01-01', endKey: '2024-03-14',
+      peakHour: 8, morningDuration: 3_600_000, afternoonDuration: 0, eveningDuration: 0, empty: false,
+      streak: { current: 1, longest: 1, monthFocusedDays: 1 } })
+    expect(distribution.heatmap).toHaveLength(73)
+    expect(distribution.heatmap.find(item => item.date === '2024-03-13')).toMatchObject({ duration: 3_600_000, level: 3, focusCount: 1 })
+    expect(distribution.records[0]).toMatchObject({ taskTitle: '完成', date: '2024-03-13' })
     service.dispose()
   })
 

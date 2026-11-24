@@ -92,3 +92,41 @@ export interface StatisticsPageData {
   records: StatisticsFocusRecord[]
   empty: boolean
 }
+
+export type FocusHeatmapRange = 'YEAR' | 'RECENT_90'
+
+export interface FocusHeatmapDay {
+  date: string
+  duration: number
+  focusCount: number
+  level: 0 | 1 | 2 | 3 | 4
+}
+
+export interface HourlyFocusPoint {
+  hour: number
+  label: string
+  duration: number
+}
+
+export interface FocusStreakMetric {
+  current: number
+  longest: number
+  monthFocusedDays: number
+}
+
+export interface FocusDistributionData {
+  range: FocusHeatmapRange
+  year: number
+  timeZone: string
+  startKey: string
+  endKey: string
+  heatmap: FocusHeatmapDay[]
+  hourly: HourlyFocusPoint[]
+  peakHour: number | null
+  morningDuration: number
+  afternoonDuration: number
+  eveningDuration: number
+  streak: FocusStreakMetric
+  records: StatisticsFocusRecord[]
+  empty: boolean
+}

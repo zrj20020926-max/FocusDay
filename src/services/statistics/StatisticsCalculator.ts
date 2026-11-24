@@ -1,9 +1,10 @@
-import type { StatisticsFocusSession, StatisticsInput, StatisticsOptions, StatisticsDashboard, DailyFocusPoint, CategoryFocusMetric, DateRange } from './StatisticsTypes'
+import type { StatisticsFocusSession, StatisticsInput, StatisticsOptions, StatisticsDashboard, DailyFocusPoint, CategoryFocusMetric, DateRange, FocusStreakMetric, HourlyFocusPoint } from './StatisticsTypes'
 import { DEFAULT_DAILY_FOCUS_GOAL } from './StatisticsTypes'
 
 const DAY_MS = 86_400_000
 const formatterCache = new Map<string, Intl.DateTimeFormat>()
 const boundaryCache = new Map<string, number>()
+const hourFormatterCache = new Map<string, Intl.DateTimeFormat>()
 
 function formatter(timeZone: string): Intl.DateTimeFormat {
   let value = formatterCache.get(timeZone)
@@ -12,6 +13,37 @@ function formatter(timeZone: string): Intl.DateTimeFormat {
     formatterCache.set(timeZone, value)
   }
   return value
+}
+
+function hourFormatter(timeZone: string): Intl.DateTimeFormat {
+  let value = hourFormatterCache.get(timeZone)
+  if (!value) {
+    value = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
+    hourFormatterCache.set(timeZone, value)
+  }
+  return value
+}
+
+function localHourAt(timestamp: number, timeZone: string): number {
+  const part = hourFormatter(timeZone).formatToParts(new Date(timestamp)).find(item => item.type === 'hour')?.value
+  return Number(part ?? 0) % 24
+}
+
+function localHourKeyAt(timestamp: number, timeZone: string): string {
+  return `${dateKeyAt(timestamp, timeZone)}-${String(localHourAt(timestamp, timeZone)).padStart(2, '0')}`
+}
+
+function nextLocalHourBoundary(timestamp: number, endTime: number, timeZone: string): number {
+  const currentKey = localHourKeyAt(timestamp, timeZone)
+  let high = Math.min(endTime, timestamp + 4 * 60 * 60 * 1000)
+  if (high <= timestamp || localHourKeyAt(high - 1, timeZone) === currentKey) return high
+  let low = timestamp + 1
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (localHourKeyAt(middle, timeZone) === currentKey) low = middle + 1
+    else high = middle
+  }
+  return low
 }
 
 export function resolvedTimeZone(): string {
@@ -82,6 +114,19 @@ function splitInterval(startTime: number, endTime: number, timeZone: string): Ma
   return output
 }
 
+function splitIntervalByHour(startTime: number, endTime: number, timeZone: string): Map<number, number> {
+  const output = new Map<number, number>()
+  let cursor = startTime
+  while (cursor < endTime) {
+    const boundary = nextLocalHourBoundary(cursor, endTime, timeZone)
+    if (boundary <= cursor) break
+    const hour = localHourAt(cursor, timeZone)
+    output.set(hour, (output.get(hour) ?? 0) + boundary - cursor)
+    cursor = boundary
+  }
+  return output
+}
+
 export function splitSessionByDay(session: StatisticsFocusSession, timeZone = resolvedTimeZone()): Map<string, number> {
   const intervals = session.activeIntervals?.filter(item => Number.isFinite(item.startTime) && Number.isFinite(item.endTime) && item.endTime > item.startTime)
   if (intervals?.length) {
@@ -99,6 +144,37 @@ export function splitSessionByDay(session: StatisticsFocusSession, timeZone = re
   entries.forEach(([key, value], index) => {
     const duration = index === entries.length - 1 ? session.duration - assigned : Math.floor(session.duration * value / totalWallTime)
     result.set(key, Math.max(0, duration)); assigned += duration
+  })
+  return result
+}
+
+export function splitSessionByHour(session: StatisticsFocusSession, startTime = -Infinity, endTime = Infinity, timeZone = resolvedTimeZone()): Map<number, number> {
+  const intervals = session.activeIntervals?.filter(item => Number.isFinite(item.startTime) && Number.isFinite(item.endTime) && item.endTime > item.startTime)
+  if (intervals?.length) {
+    const exact = new Map<number, number>()
+    for (const interval of intervals) {
+      const start = Math.max(interval.startTime, startTime)
+      const end = Math.min(interval.endTime, endTime)
+      if (end <= start) continue
+      for (const [hour, value] of splitIntervalByHour(start, end, timeZone)) exact.set(hour, (exact.get(hour) ?? 0) + value)
+    }
+    return exact
+  }
+  const start = Math.max(session.startTime, startTime)
+  const end = Math.min(session.endTime, endTime)
+  if (end <= start) return new Map()
+  if (session.endTime === session.startTime) return new Map([[localHourAt(session.startTime, timeZone), session.duration]])
+  const wallByHour = splitIntervalByHour(start, end, timeZone)
+  const fullWallDuration = Math.max(1, session.endTime - session.startTime)
+  const effectiveInRange = session.duration * (end - start) / fullWallDuration
+  const selectedWallDuration = [...wallByHour.values()].reduce((sum, value) => sum + value, 0)
+  if (!selectedWallDuration) return new Map()
+  const result = new Map<number, number>()
+  let assigned = 0
+  const entries = [...wallByHour.entries()]
+  entries.forEach(([hour, value], index) => {
+    const duration = index === entries.length - 1 ? Math.round(effectiveInRange) - assigned : Math.floor(effectiveInRange * value / selectedWallDuration)
+    result.set(hour, Math.max(0, duration)); assigned += duration
   })
   return result
 }
@@ -204,5 +280,30 @@ export class StatisticsCalculator {
       for (const [key, value] of splitSessionByDay(session, timeZone)) if (key >= startKey && key < endKeyExclusive) duration += value
       return duration
     }).filter(item => item.duration > 0)
+  }
+
+  static hourlyDistribution(sessions: StatisticsFocusSession[], startTime: number, endTime: number, timeZone = resolvedTimeZone()): HourlyFocusPoint[] {
+    const totals = new Array<number>(24).fill(0)
+    for (const session of normalizedSessions(sessions)) {
+      for (const [hour, duration] of splitSessionByHour(session, startTime, endTime, timeZone)) totals[hour] += duration
+    }
+    return totals.map((duration, hour) => ({ hour, label: `${String(hour).padStart(2, '0')}:00`, duration }))
+  }
+
+  static streakMetrics(sessions: StatisticsFocusSession[], now = Date.now(), timeZone = resolvedTimeZone()): FocusStreakMetric {
+    const daily = durationMap(normalizedSessions(sessions), timeZone)
+    const focused = [...daily.entries()].filter(([, duration]) => duration > 0).map(([key]) => key).sort()
+    const focusedSet = new Set(focused)
+    const todayKey = dateKeyAt(now, timeZone)
+    let anchor = focusedSet.has(todayKey) ? todayKey : addCalendarDays(todayKey, -1)
+    let current = 0
+    while (focusedSet.has(anchor)) { current += 1; anchor = addCalendarDays(anchor, -1) }
+    let longest = 0; let run = 0; let previous = ''
+    for (const key of focused) {
+      run = previous && addCalendarDays(previous, 1) === key ? run + 1 : 1
+      longest = Math.max(longest, run); previous = key
+    }
+    const month = todayKey.slice(0, 7)
+    return { current, longest, monthFocusedDays: focused.filter(key => key.startsWith(month)).length }
   }
 }

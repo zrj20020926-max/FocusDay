@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FocusSession } from '../../types/focusSession'
 import type { Task, TaskCategory } from '../../types/task'
-import { StatisticsCalculator, addCalendarDays, dateKeyAt, rangeForDateKey, splitSessionByDay, weekStartKey } from './StatisticsCalculator'
+import { StatisticsCalculator, addCalendarDays, dateKeyAt, rangeForDateKey, splitSessionByDay, splitSessionByHour, weekStartKey } from './StatisticsCalculator'
 import type { StatisticsFocusSession } from './StatisticsTypes'
 
 const at = (value: string) => Date.parse(value)
@@ -101,5 +101,46 @@ describe('StatisticsCalculator', () => {
       expect.objectContaining({ categoryId: 'work', name: '工作', duration: 3_600_000 }),
       expect.objectContaining({ categoryId: null, name: '自由专注', duration: 1_800_000 }),
     ])
+  })
+
+  it('生成完整的 365 天与 366 天年度序列', () => {
+    expect(StatisticsCalculator.dailySeries([], '2023-01-01', '2024-01-01', 'UTC')).toHaveLength(365)
+    expect(StatisticsCalculator.dailySeries([], '2024-01-01', '2025-01-01', 'UTC')).toHaveLength(366)
+  })
+
+  it('按小时区间交集拆分跨小时记录，而不是归入开始小时', () => {
+    const value = session('2024-03-13T08:30:00Z', '2024-03-13T10:30:00Z')
+    expect([...splitSessionByHour(value, -Infinity, Infinity, 'UTC').entries()]).toEqual([
+      [8, 30 * 60_000], [9, 60 * 60_000], [10, 30 * 60_000],
+    ])
+  })
+
+  it('存在有效时间片时精确拆分暂停后的小时分布', () => {
+    const value = session('2024-03-13T08:00:00Z', '2024-03-13T11:00:00Z', 40 * 60_000, { activeIntervals: [
+      { startTime: at('2024-03-13T08:50:00Z'), endTime: at('2024-03-13T09:10:00Z') },
+      { startTime: at('2024-03-13T10:00:00Z'), endTime: at('2024-03-13T10:20:00Z') },
+    ] })
+    expect([...splitSessionByHour(value, -Infinity, Infinity, 'UTC').entries()]).toEqual([
+      [8, 10 * 60_000], [9, 10 * 60_000], [10, 20 * 60_000],
+    ])
+  })
+
+  it('小时分布遵循用户时区并正确跨越本地午夜', () => {
+    const value = session('2024-03-13T15:30:00Z', '2024-03-13T16:30:00Z')
+    expect([...splitSessionByHour(value, -Infinity, Infinity, 'Asia/Shanghai').entries()]).toEqual([
+      [23, 30 * 60_000], [0, 30 * 60_000],
+    ])
+  })
+
+  it('计算当前、历史最长连续天数和本月专注天数', () => {
+    const sessions = [
+      session('2024-02-27T08:00:00Z', '2024-02-27T08:10:00Z'),
+      session('2024-02-28T08:00:00Z', '2024-02-28T08:10:00Z'),
+      session('2024-02-29T08:00:00Z', '2024-02-29T08:10:00Z'),
+      session('2024-03-11T08:00:00Z', '2024-03-11T08:10:00Z'),
+      session('2024-03-12T08:00:00Z', '2024-03-12T08:10:00Z'),
+    ]
+    expect(StatisticsCalculator.streakMetrics(sessions, at('2024-03-13T12:00:00Z'), 'UTC')).toEqual({ current: 2, longest: 3, monthFocusedDays: 2 })
+    expect(StatisticsCalculator.streakMetrics([], at('2024-03-13T12:00:00Z'), 'UTC')).toEqual({ current: 0, longest: 0, monthFocusedDays: 0 })
   })
 })

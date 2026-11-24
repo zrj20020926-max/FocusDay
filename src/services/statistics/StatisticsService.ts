@@ -4,7 +4,7 @@ import type { Task, TaskCategory } from '../../types/task'
 import { DatabaseService, databaseService } from '../database/DatabaseService'
 import { syncQueueService, type SyncQueueService } from '../sync/SyncQueueService'
 import { addCalendarDays, dateKeyAt, rangeForDateKey, splitSessionByDay, startOfDateKey, StatisticsCalculator, weekStartKey } from './StatisticsCalculator'
-import type { DailyFocusPoint, StatisticsDashboard, StatisticsOptions, StatisticsPageData, StatisticsRange, StatisticsTrendPoint } from './StatisticsTypes'
+import type { DailyFocusPoint, FocusDistributionData, FocusHeatmapRange, StatisticsDashboard, StatisticsFocusRecord, StatisticsOptions, StatisticsPageData, StatisticsRange, StatisticsTrendPoint } from './StatisticsTypes'
 import { DEFAULT_DAILY_FOCUS_GOAL } from './StatisticsTypes'
 
 const sessionFromRecord = (record: FocusSessionRecord): FocusSession => {
@@ -89,16 +89,7 @@ export class StatisticsService {
       if (key >= startKey && key < endKey) completedByDate.set(key, (completedByDate.get(key) ?? 0) + 1)
     }
     const trend = this.buildTrend(range, daily, completedByDate, timeZone)
-    const taskMap = new Map(allTasks.map(task => [task.id, task]))
-    const categoryMap = new Map(categories.map(category => [category.id, category]))
-    const records = sessions.filter(session => session.status === 'COMPLETED').map(session => {
-      const task = session.taskId ? taskMap.get(session.taskId) : null
-      const category = task ? categoryMap.get(task.categoryId) : null
-      return { id: session.id, date: dateKeyAt(session.startTime, timeZone), dates: [...splitSessionByDay(session, timeZone).keys()], startTime: session.startTime, endTime: session.endTime,
-        duration: session.duration, mode: session.mode, taskId: session.taskId, taskTitle: task?.title ?? (session.taskId ? '已删除任务' : '自由专注'),
-        categoryId: category?.id ?? null, categoryName: category?.name ?? (session.taskId ? '已删除任务' : '自由专注'),
-        categoryColor: category?.color ?? '#b69caf', completedPomodoros: session.completedPomodoros }
-    }).sort((a, b) => b.startTime - a.startTime)
+    const records = this.buildRecords(sessions, allTasks, categories, timeZone)
     const focusDuration = daily.reduce((sum, item) => sum + item.duration, 0)
     const completedTasks = [...completedByDate.values()].reduce((sum, value) => sum + value, 0)
     const completedPomodoros = daily.reduce((sum, item) => sum + item.completedPomodoros, 0)
@@ -108,6 +99,39 @@ export class StatisticsService {
       taskCompletionRate: dashboard.taskCompletionRate, trend,
       categories: StatisticsCalculator.categoryDurations(input, startKey, endKey, timeZone), records,
       empty: focusDuration === 0 && completedTasks === 0 }
+  }
+
+  async getFocusDistribution(range: FocusHeatmapRange, year: number, options: StatisticsOptions = {}): Promise<FocusDistributionData> {
+    await this.database.initialize()
+    const now = options.now ?? Date.now()
+    const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
+    const todayKey = dateKeyAt(now, timeZone)
+    const currentYear = Number(todayKey.slice(0, 4))
+    const selectedYear = Math.min(Math.max(1970, Math.trunc(year)), currentYear)
+    const startKey = range === 'RECENT_90' ? addCalendarDays(todayKey, -89) : `${selectedYear}-01-01`
+    const endKey = range === 'RECENT_90' || selectedYear === currentYear ? addCalendarDays(todayKey, 1) : `${selectedYear + 1}-01-01`
+    const start = startOfDateKey(startKey, timeZone)
+    const end = startOfDateKey(endKey, timeZone)
+    const [sessionRecords, taskRecords, categoryRecords] = await Promise.all([
+      this.database.db.focusSessions.filter(record => !record.deletedAt).toArray(), this.database.db.tasks.toArray(), this.database.db.categories.toArray(),
+    ])
+    const allSessions = sessionRecords.map(sessionFromRecord)
+    const selectedSessions = allSessions.filter(session => session.endTime > start && session.startTime < end)
+    const daily = StatisticsCalculator.dailySeries(selectedSessions, startKey, endKey, timeZone)
+    const heatmap = daily.map(item => ({ ...item, level: this.heatmapLevel(item.duration) }))
+    const hourly = StatisticsCalculator.hourlyDistribution(selectedSessions, start, end, timeZone)
+    const peak = hourly.reduce((best, item) => item.duration > best.duration ? item : best, { hour: -1, label: '', duration: 0 })
+    const allTasks = taskRecords.map(({ deletedAt: _, syncStatus: _s, version: _v, ...task }) => task as Task)
+    const categories = categoryRecords.map(({ deletedAt: _, syncStatus: _s, version: _v, ...category }) => category as TaskCategory)
+    const sumHours = (from: number, to: number) => hourly.slice(from, to).reduce((sum, item) => sum + item.duration, 0)
+    return {
+      range, year: selectedYear, timeZone, startKey, endKey, heatmap, hourly,
+      peakHour: peak.duration > 0 ? peak.hour : null,
+      morningDuration: sumHours(0, 12), afternoonDuration: sumHours(12, 18), eveningDuration: sumHours(18, 24),
+      streak: StatisticsCalculator.streakMetrics(allSessions, now, timeZone),
+      records: this.buildRecords(selectedSessions, allTasks, categories, timeZone),
+      empty: !daily.some(item => item.duration > 0),
+    }
   }
 
   private buildTrend(range: StatisticsRange, daily: DailyFocusPoint[], completedByDate: Map<string, number>, timeZone: string): StatisticsTrendPoint[] {
@@ -131,6 +155,27 @@ export class StatisticsService {
       months.set(key, current)
     }
     return [...months.values()]
+  }
+
+  private buildRecords(sessions: FocusSession[], tasks: Task[], categories: TaskCategory[], timeZone: string): StatisticsFocusRecord[] {
+    const taskMap = new Map(tasks.map(task => [task.id, task]))
+    const categoryMap = new Map(categories.map(category => [category.id, category]))
+    return sessions.filter(session => session.status === 'COMPLETED' && session.duration > 0).map(session => {
+      const task = session.taskId ? taskMap.get(session.taskId) : null
+      const category = task ? categoryMap.get(task.categoryId) : null
+      return { id: session.id, date: dateKeyAt(session.startTime, timeZone), dates: [...splitSessionByDay(session, timeZone).keys()], startTime: session.startTime, endTime: session.endTime,
+        duration: session.duration, mode: session.mode, taskId: session.taskId, taskTitle: task?.title ?? (session.taskId ? '已删除任务' : '自由专注'),
+        categoryId: category?.id ?? null, categoryName: category?.name ?? (session.taskId ? '已删除任务' : '自由专注'),
+        categoryColor: category?.color ?? '#b69caf', completedPomodoros: session.completedPomodoros }
+    }).sort((a, b) => b.startTime - a.startTime)
+  }
+
+  private heatmapLevel(duration: number): 0 | 1 | 2 | 3 | 4 {
+    if (duration <= 0) return 0
+    if (duration < 30 * 60_000) return 1
+    if (duration < 60 * 60_000) return 2
+    if (duration < 2 * 60 * 60_000) return 3
+    return 4
   }
 
   private async readDailyGoal(): Promise<number> {
