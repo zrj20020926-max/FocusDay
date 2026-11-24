@@ -9,6 +9,7 @@ export default createRouter({
     { path: '/stats', name: 'stats', component: () => import('./views/StatsView.vue') },
     { path: '/categories', name: 'categories', component: () => import('./views/CategoriesView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
+    { path: '/account', name: 'account', component: () => import('./views/AuthView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]
 })

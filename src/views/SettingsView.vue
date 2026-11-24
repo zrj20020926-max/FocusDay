@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { Bell, Clock3, Palette, PanelRight, Volume2, Sun, ChevronRight, Check } from 'lucide-vue-next'
+import { Bell, Clock3, Palette, PanelRight, Volume2, Sun, ChevronRight, Check, Cloud } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { useTimerStore } from '../stores/timerStore'
 
@@ -44,6 +44,7 @@ function saveTimerConfig() {
 
     <div class="settings-layout">
       <nav class="settings-nav" aria-label="设置分类">
+        <router-link to="/account"><Cloud :size="18" />账号与云端</router-link>
         <a class="active" href="#appearance"><Palette :size="18" />外观与布局</a>
         <a href="#focus-preferences"><Clock3 :size="18" />专注偏好</a>
         <a href="#notifications"><Bell :size="18" />通知提醒</a>

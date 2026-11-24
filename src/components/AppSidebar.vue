@@ -2,8 +2,10 @@
 import { CalendarDays, CheckSquare2, Timer, ChartNoAxesCombined, Tags, Settings, Plus, Search, Sparkles } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { useTaskStore } from '../stores/taskStore'
+import { useAuthStore } from '../stores/authStore'
 const store = useAppStore()
 const taskStore = useTaskStore()
+const authStore = useAuthStore()
 const nav = [
   { to: '/', label: '今日', icon: CalendarDays },
   { to: '/tasks', label: '任务', icon: CheckSquare2 },
@@ -28,6 +30,6 @@ const nav = [
     </nav>
     <div class="sidebar-spacer" />
     <button class="search-hint" @click="store.commandOpen = true"><Search :size="16" /><span>快速搜索</span><kbd>⌘ K</kbd></button>
-    <div class="profile"><div class="avatar">予</div><div><strong>林予安</strong><small>自在专注，慢慢生长</small></div><span class="online" /></div>
+    <router-link to="/account" class="profile"><div class="avatar">{{authStore.displayName.slice(0, 1)}}</div><div><strong>{{authStore.displayName}}</strong><small>{{authStore.isAuthenticated?'云端账户已连接':'本地模式 · 可选登录'}}</small></div><span class="online" :class="{ offline: !authStore.isAuthenticated }" /></router-link>
   </aside>
 </template>
