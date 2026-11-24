@@ -1,6 +1,7 @@
 import type { FocusSession } from './focusSession'
 import type { Task, TaskCategory } from './task'
 import type { TimerSnapshot } from './timer'
+import type { SyncConflict, SyncEntityType, SyncOperation, SyncQueueStatus } from './sync'
 
 export const SYNC_STATUSES = ['LOCAL', 'PENDING', 'SYNCED', 'CONFLICT'] as const
 export type SyncStatus = (typeof SYNC_STATUSES)[number]
@@ -34,17 +35,22 @@ export interface UserSettingsRecord extends PersistenceMetadata {
   value: unknown
 }
 
-export type SyncOperation = 'UPSERT' | 'DELETE'
-
 export interface SyncQueueRecord extends PersistenceMetadata {
   id: string
-  entityType: string
+  entityType: SyncEntityType
   entityId: string
   operation: SyncOperation
   payload: unknown
-  attempts: number
+  baseVersion: number
+  baseUpdatedAt: string | null
+  retryCount: number
   nextAttemptAt: string | null
+  status: SyncQueueStatus
   lastError: string | null
+}
+
+export interface SyncConflictRecord extends SyncConflict {
+  deletedAt: string | null
 }
 
 export interface SyncMetadataRecord extends PersistenceMetadata {
@@ -66,6 +72,7 @@ export interface DatabaseExport {
     userSettings: UserSettingsRecord[]
     syncQueue: SyncQueueRecord[]
     syncMetadata: SyncMetadataRecord[]
+    syncConflicts: SyncConflictRecord[]
   }
 }
 

@@ -2,7 +2,7 @@ import type { TaskRepository } from '../../repositories/task/TaskRepository'
 import { TaskDomainError, type CreateCategoryInput, type TaskCategory, type UpdateCategoryInput } from '../../types/task'
 
 function createId(): string {
-  return `category-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function validate(input: CreateCategoryInput): CreateCategoryInput {
@@ -39,7 +39,11 @@ export class CategoryService {
   }
 
   async delete(id: string): Promise<void> {
-    if (id === 'other') throw new TaskDomainError('“其他”是任务的兜底分类，不能删除', 'INVALID_RELATION')
-    if (!await this.repository.deleteCategory(id, 'other')) throw new TaskDomainError('要删除的分类不存在', 'CATEGORY_NOT_FOUND')
+    const categories = await this.getAll()
+    const current = categories.find(category => category.id === id)
+    const fallback = categories.find(category => category.isDefault && category.name === '其他')
+    if (!current) throw new TaskDomainError('要删除的分类不存在', 'CATEGORY_NOT_FOUND')
+    if (current.id === fallback?.id) throw new TaskDomainError('“其他”是任务的兜底分类，不能删除', 'INVALID_RELATION')
+    if (!fallback || !await this.repository.deleteCategory(id, fallback.id)) throw new TaskDomainError('要删除的分类不存在', 'CATEGORY_NOT_FOUND')
   }
 }

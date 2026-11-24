@@ -107,6 +107,13 @@ export const useTimerStore = defineStore('timer', {
       } catch (error) { this.fail(error) }
       finally { tickInFlight = false }
     },
+    async refreshFromPersistence() {
+      await timerRepository.reload()
+      this.timerState = service.restore(true)
+      this.config = service.getConfig()
+      this.records = service.getRecords()
+      this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
+    },
     async selectMode(mode: TimerMode) {
       return this.run(() => service.prepare(mode))
     },

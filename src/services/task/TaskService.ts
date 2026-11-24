@@ -12,8 +12,8 @@ import {
   type UpdateTaskInput,
 } from '../../types/task'
 
-function createId(prefix: string): string {
-  return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
+function createId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function assertDate(value: string | null | undefined, field: string): void {
@@ -58,7 +58,7 @@ export class TaskService {
     this.pendingCreates.add(key)
     try {
       const categories = await this.repository.listCategories()
-      const categoryId = input.categoryId ?? 'other'
+      const categoryId = input.categoryId ?? categories.find(category => category.isDefault && category.name === '其他')?.id ?? categories[0]?.id
       if (!categories.some(category => category.id === categoryId)) throw new TaskDomainError('任务分类不存在', 'INVALID_RELATION')
       const priority = input.priority ?? 'MEDIUM'
       const status = input.status ?? 'TODO'
@@ -75,7 +75,7 @@ export class TaskService {
       const tasks = await this.getAll()
       const now = new Date().toISOString()
       const task: Task = {
-        id: createId('task'),
+        id: createId(),
         title,
         description: input.description?.trim() ?? '',
         categoryId,

@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { Bell, Clock3, Palette, PanelRight, Volume2, Sun, ChevronRight, Check, Cloud } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { Bell, Clock3, Palette, PanelRight, Volume2, Sun, Check, Cloud, RefreshCw, WifiOff, AlertCircle } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { useTimerStore } from '../stores/timerStore'
+import { useAuthStore } from '../stores/authStore'
+import { useSyncStatus } from '../composables/useSyncStatus'
 
 const store = useAppStore()
 const timerStore = useTimerStore()
+const authStore = useAuthStore()
+const { snapshot: syncSnapshot, syncNow } = useSyncStatus()
+const syncing = computed(() => syncSnapshot.value.status === 'SYNCING')
+const syncLabel = computed(() => ({ SYNCED: '已同步', SYNCING: '同步中', PENDING: '等待同步', OFFLINE: '离线', ERROR: '同步异常', CONFLICT: '存在冲突' }[syncSnapshot.value.status]))
+const lastSyncLabel = computed(() => syncSnapshot.value.lastSyncedAt
+  ? new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(syncSnapshot.value.lastSyncedAt))
+  : '尚未同步')
 const notifications = ref(true)
 const focusSound = ref(true)
 const focusMinutes = ref(timerStore.config.pomodoro.focusDuration / 60000)
@@ -51,6 +60,14 @@ function saveTimerConfig() {
       </nav>
 
       <div class="settings-content">
+        <section id="cloud-sync" class="setting-section sync-section">
+          <div class="setting-heading"><h2>云端同步</h2><p>本地数据优先保存，联网并登录后会自动与其他设备同步。</p></div>
+          <div class="setting-row sync-status-row">
+            <span class="setting-icon"><WifiOff v-if="syncSnapshot.status === 'OFFLINE'" :size="18" /><AlertCircle v-else-if="['ERROR', 'CONFLICT'].includes(syncSnapshot.status)" :size="18" /><Cloud v-else :size="18" /></span>
+            <div><strong>{{ syncLabel }}</strong><small>最近同步：{{ lastSyncLabel }} · 待同步 {{ syncSnapshot.pendingCount }} 项</small><small v-if="syncSnapshot.lastError" class="sync-error">{{ syncSnapshot.lastError }}</small></div>
+            <button class="sync-button" :disabled="syncing || !authStore.isAuthenticated" @click="syncNow"><RefreshCw :size="16" :class="{ spinning: syncing }" />手动同步</button>
+          </div>
+        </section>
         <section id="appearance" class="setting-section">
           <div class="setting-heading"><h2>外观与布局</h2><p>选择你喜欢的界面呈现方式。</p></div>
           <div class="theme-options">

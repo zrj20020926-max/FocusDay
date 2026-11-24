@@ -37,6 +37,7 @@ export const useFocusSessionStore = defineStore('focusSessions', {
       this.sessions = await service.initialize()
       this.initialized = true
     },
+    async refreshFromPersistence() { this.sessions = await service.reload(); this.initialized = true },
     async syncTimerRecords(records: FocusRecord[], showFeedback = true): Promise<FocusSession[]> {
       if (!this.initialized) await this.initialize()
       const result = await service.syncTimerRecords(records)

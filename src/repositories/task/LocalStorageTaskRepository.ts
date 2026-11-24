@@ -20,12 +20,13 @@ export function createSeedTaskData(): StoredTaskData {
   const now = new Date().toISOString()
   const today = localDateKey()
   const tomorrow = addDays(today, 1)
+  const ids = { study: crypto.randomUUID(), work: crypto.randomUUID(), life: crypto.randomUUID(), sport: crypto.randomUUID(), other: crypto.randomUUID() }
   const categories: TaskCategory[] = [
-    { id: 'study', name: '学习', color: '#9aa8be', icon: 'BookOpen', isDefault: true, createdAt: now, updatedAt: now },
-    { id: 'work', name: '工作', color: '#8fa78a', icon: 'Briefcase', isDefault: true, createdAt: now, updatedAt: now },
-    { id: 'life', name: '生活', color: '#d5a98e', icon: 'Home', isDefault: true, createdAt: now, updatedAt: now },
-    { id: 'sport', name: '运动', color: '#a7b99b', icon: 'Dumbbell', isDefault: true, createdAt: now, updatedAt: now },
-    { id: 'other', name: '其他', color: '#b69caf', icon: 'Shapes', isDefault: true, createdAt: now, updatedAt: now },
+    { id: ids.study, name: '学习', color: '#9aa8be', icon: 'BookOpen', isDefault: true, createdAt: now, updatedAt: now },
+    { id: ids.work, name: '工作', color: '#8fa78a', icon: 'Briefcase', isDefault: true, createdAt: now, updatedAt: now },
+    { id: ids.life, name: '生活', color: '#d5a98e', icon: 'Home', isDefault: true, createdAt: now, updatedAt: now },
+    { id: ids.sport, name: '运动', color: '#a7b99b', icon: 'Dumbbell', isDefault: true, createdAt: now, updatedAt: now },
+    { id: ids.other, name: '其他', color: '#b69caf', icon: 'Shapes', isDefault: true, createdAt: now, updatedAt: now },
   ]
   const source = [
     ['完成 Focus Day 首页视觉稿', '梳理核心场景与交互路径，完成页面检查。', 'work', 'HIGH', 'IN_PROGRESS', today, today, 45],
@@ -37,10 +38,10 @@ export function createSeedTaskData(): StoredTaskData {
     ['复盘本月目标', '', 'other', 'LOW', 'COMPLETED', null, tomorrow, 40],
   ] as const
   const tasks: Task[] = source.map((item, index) => ({
-    id: `seed-${index + 1}`,
+    id: crypto.randomUUID(),
     title: item[0],
     description: item[1],
-    categoryId: item[2],
+    categoryId: ids[item[2]],
     priority: item[3],
     status: item[4],
     plannedDate: item[5],

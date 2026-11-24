@@ -12,6 +12,7 @@ import CommandPalette from './components/CommandPalette.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import FocusCompletionDialog from './components/FocusCompletionDialog.vue'
 import { PanelRightOpen } from 'lucide-vue-next'
+import { syncScheduler } from './services/sync/SyncScheduler'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
@@ -38,8 +39,19 @@ const stopScrollWatch = watch(
   locked => { document.body.style.overflow = locked ? 'hidden' : '' },
   { immediate: true }
 )
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => { window.removeEventListener('keydown', onKeydown); stopScrollWatch(); document.body.style.overflow = '' })
+async function onDataSynced() {
+  await Promise.all([taskStore.refresh(), focusSessionStore.refreshFromPersistence(), timerStore.refreshFromPersistence()])
+}
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('focus-day:data-synced', onDataSynced)
+  void syncScheduler.start()
+})
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('focus-day:data-synced', onDataSynced)
+  syncScheduler.stop(); stopScrollWatch(); document.body.style.overflow = ''
+})
 </script>
 
 <template>

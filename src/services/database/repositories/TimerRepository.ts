@@ -1,5 +1,7 @@
 import type { TimerSnapshot, TimerStorage } from '../../../types/timer'
+import type { TimerStateRecord } from '../../../types/database'
 import { DatabaseService, databaseService } from '../DatabaseService'
+import { SyncQueueService } from '../../sync/SyncQueueService'
 
 export interface DurableTimerStorage extends TimerStorage {
   initialize(): Promise<void>
@@ -11,10 +13,18 @@ export class TimerRepository implements DurableTimerStorage {
   private pendingWrite: Promise<void> = Promise.resolve()
   private initialized = false
 
-  constructor(private readonly database: DatabaseService = databaseService) {}
+  private readonly queue: SyncQueueService
+  constructor(private readonly database: DatabaseService = databaseService) { this.queue = new SyncQueueService(database) }
 
   async initialize(): Promise<void> {
     if (this.initialized) return
+    await this.database.initialize()
+    const record = await this.database.db.timerStates.get('active')
+    this.snapshot = record && !record.deletedAt ? structuredClone(record.snapshot) : null
+    this.initialized = true
+  }
+
+  async reload(): Promise<void> {
     await this.database.initialize()
     const record = await this.database.db.timerStates.get('active')
     this.snapshot = record && !record.deletedAt ? structuredClone(record.snapshot) : null
@@ -33,7 +43,8 @@ export class TimerRepository implements DurableTimerStorage {
     this.pendingWrite = this.pendingWrite.catch(() => undefined).then(async () => {
       const previous = await this.database.db.timerStates.get('active')
       const now = new Date().toISOString()
-      await this.database.db.timerStates.put({
+      await this.database.transaction(async () => {
+        const record: TimerStateRecord = {
         id: 'active',
         snapshot: queued,
         createdAt: previous?.createdAt ?? now,
@@ -41,6 +52,10 @@ export class TimerRepository implements DurableTimerStorage {
         deletedAt: null,
         syncStatus: 'PENDING',
         version: (previous?.version ?? 0) + 1,
+        }
+        await this.database.db.timerStates.put(record)
+        await this.queue.enqueueWithinTransaction({ entityType: 'TIMER_STATE', entityId: 'active', operation: previous ? 'UPDATE' : 'INSERT', payload: record,
+          baseVersion: previous?.version ?? 0, baseUpdatedAt: previous?.updatedAt ?? null })
       })
     })
   }

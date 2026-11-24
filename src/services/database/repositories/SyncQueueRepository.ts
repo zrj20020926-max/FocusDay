@@ -1,29 +1,24 @@
 import type { SyncMetadataRecord, SyncQueueRecord } from '../../../types/database'
+import type { EnqueueInput } from '../../sync/SyncQueueService'
+import { SyncQueueService } from '../../sync/SyncQueueService'
 import { DatabaseService, databaseService } from '../DatabaseService'
 
 export class SyncQueueRepository {
-  constructor(private readonly database: DatabaseService = databaseService) {}
+  private readonly queue: SyncQueueService
+  constructor(private readonly database: DatabaseService = databaseService) { this.queue = new SyncQueueService(database) }
 
-  async enqueue(input: Omit<SyncQueueRecord, 'createdAt' | 'updatedAt' | 'deletedAt' | 'syncStatus' | 'version'>): Promise<SyncQueueRecord> {
-    await this.database.initialize()
-    const now = new Date().toISOString()
-    const record: SyncQueueRecord = { ...structuredClone(input), createdAt: now, updatedAt: now, deletedAt: null, syncStatus: 'LOCAL', version: 1 }
-    await this.database.db.syncQueue.put(record)
-    return structuredClone(record)
-  }
+  enqueue(input: EnqueueInput): Promise<SyncQueueRecord> { return this.queue.enqueue(input) }
 
   async pending(): Promise<SyncQueueRecord[]> {
     await this.database.initialize()
-    return (await this.database.db.syncQueue.orderBy('createdAt').toArray()).filter(record => !record.deletedAt)
+    return this.queue.ready(Number.MAX_SAFE_INTEGER)
   }
 
   async remove(id: string): Promise<boolean> {
     await this.database.initialize()
-    const current = await this.database.db.syncQueue.get(id)
-    if (!current || current.deletedAt) return false
-    const now = new Date().toISOString()
-    await this.database.db.syncQueue.put({ ...current, deletedAt: now, updatedAt: now, version: current.version + 1 })
-    return true
+    const exists = Boolean(await this.database.db.syncQueue.get(id))
+    if (exists) await this.queue.complete(id)
+    return exists
   }
 
   async getMetadata(id: string): Promise<SyncMetadataRecord | null> {

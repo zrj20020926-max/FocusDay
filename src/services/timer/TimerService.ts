@@ -41,8 +41,8 @@ export class TimerService {
     private readonly clock: Clock = systemClock,
   ) {}
 
-  restore(): TimerState {
-    if (this.initialized) return this.synchronize()
+  restore(force = false): TimerState {
+    if (this.initialized && !force) return this.synchronize()
     const snapshot = this.storage.load()
     if (snapshot) {
       this.validateConfig(snapshot.config)

@@ -41,6 +41,12 @@ export class FocusSessionService {
     return this.getAll()
   }
 
+  async reload(): Promise<FocusSession[]> {
+    this.sessions = await this.repository.list()
+    this.initialized = true
+    return this.getAll()
+  }
+
   getAll(): FocusSession[] {
     return clone(this.sessions).sort((a, b) => b.endTime - a.endTime)
   }
@@ -49,7 +55,8 @@ export class FocusSessionService {
     if (!this.initialized) await this.initialize()
     const created: FocusSession[] = []
     for (const record of records) {
-      const id = `focus:${record.id}`
+      const existing = this.sessions.find(item => item.sourceRecordId === record.id)
+      const id = existing?.id ?? crypto.randomUUID()
       const session: FocusSession = {
         id,
         taskId: record.taskId,
@@ -74,7 +81,8 @@ export class FocusSessionService {
   async recordCancellation(input: CancelledSessionInput): Promise<FocusSession> {
     if (!this.initialized) await this.initialize()
     const { timerState, endedAt } = input
-    const id = `focus:${timerState.sessionId}:${timerState.phaseSequence}:cancelled`
+    const sourceRecordId = `cancelled:${timerState.sessionId}:${timerState.phaseSequence}`
+    const id = this.sessions.find(item => item.sourceRecordId === sourceRecordId)?.id ?? crypto.randomUUID()
     const session: FocusSession = {
       id,
       taskId: timerState.taskId,
@@ -84,7 +92,7 @@ export class FocusSessionService {
       duration: timerState.currentPhase === 'FOCUS' ? Math.max(0, input.duration) : 0,
       status: 'CANCELLED',
       createdAt: endedAt,
-      sourceRecordId: null,
+      sourceRecordId,
       completedNaturally: false,
       completedPomodoros: 0,
     }

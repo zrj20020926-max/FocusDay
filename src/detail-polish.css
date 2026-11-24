@@ -4,6 +4,12 @@
 .settings-nav a:hover{background:rgba(250,249,245,.7)}
 .settings-nav a.active{background:#e2e7dd;color:#587054;font-weight:600}
 .setting-section{scroll-margin-top:34px}
+.sync-button{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:0 13px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-size:13px;transition:transform .16s ease,border-color .16s ease,opacity .16s ease}
+.sync-button:hover:not(:disabled){border-color:#b9c7b4;transform:translateY(-1px)}
+.sync-button:active:not(:disabled){transform:translateY(0) scale(.98)}
+.sync-button:disabled{opacity:.48;cursor:not-allowed}.sync-error{color:#a46158!important;max-width:540px}.spinning{animation:sync-spin .9s linear infinite}
+@keyframes sync-spin{to{transform:rotate(360deg)}}
+@media(max-width:540px){.sync-status-row{align-items:flex-start;flex-wrap:wrap}.sync-status-row>div{min-width:calc(100% - 52px)}.sync-button{margin-left:48px}}
 .command-label{font-size:11px}.command-group strong{font-size:14px}.command-group small,.command-modal footer,.shortcut{font-size:11px}
 .drawer-status,.drawer-project{font-size:12px}.detail-grid span{font-size:11px}.detail-grid strong{font-size:12px}.notes>span,.subtasks label{font-size:13px}.notes p{font-size:13px}
 .drawer-header-actions{display:flex;align-items:center;gap:3px}.drawer-title-input{display:block;width:calc(100% - 39px);margin-left:39px;border:1px solid #cfd6cb;background:#fff;border-radius:10px;padding:8px 10px;font-size:18px;font-weight:650;color:var(--text);outline:0}.drawer-title-input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(146,170,139,.12)}.drawer-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 16px}.drawer-edit-grid label{font-size:11px;color:var(--muted)}.drawer-edit-grid input{width:100%;height:38px;border:1px solid var(--line);border-radius:9px;background:#f8f7f2;padding:0 10px;margin-top:6px;color:var(--text);outline:0}.drawer-edit-grid label>span{display:flex;align-items:center;gap:6px}.drawer-edit-grid label>span input{width:80px}.delete-button{height:40px;padding:0 12px;border-radius:10px;background:transparent;color:#a46a5a;display:flex;align-items:center;gap:7px;font-size:12px}.delete-button:hover{background:#f2e4df}.delete-button.confirming{background:#a85f4d;color:#fff}.drawer-footer-spacer{flex:1}

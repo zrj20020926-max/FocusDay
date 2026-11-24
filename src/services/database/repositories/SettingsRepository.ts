@@ -1,8 +1,10 @@
 import type { UserSettingsRecord } from '../../../types/database'
 import { DatabaseService, databaseService } from '../DatabaseService'
+import { SyncQueueService } from '../../sync/SyncQueueService'
 
 export class SettingsRepository {
-  constructor(private readonly database: DatabaseService = databaseService) {}
+  private readonly queue: SyncQueueService
+  constructor(private readonly database: DatabaseService = databaseService) { this.queue = new SyncQueueService(database) }
 
   async get<T>(id: string): Promise<T | null> {
     await this.database.initialize()
@@ -18,7 +20,11 @@ export class SettingsRepository {
       id, value: structuredClone(value), createdAt: current?.createdAt ?? now, updatedAt: now,
       deletedAt: null, syncStatus: 'PENDING', version: (current?.version ?? 0) + 1,
     }
-    await this.database.db.userSettings.put(record)
+    await this.database.transaction(async () => {
+      await this.database.db.userSettings.put(record)
+      await this.queue.enqueueWithinTransaction({ entityType: 'USER_SETTING', entityId: id, operation: current ? 'UPDATE' : 'INSERT', payload: record,
+        baseVersion: current?.version ?? 0, baseUpdatedAt: current?.updatedAt ?? null })
+    })
   }
 
   async delete(id: string): Promise<boolean> {
@@ -26,7 +32,12 @@ export class SettingsRepository {
     const current = await this.database.db.userSettings.get(id)
     if (!current || current.deletedAt) return false
     const now = new Date().toISOString()
-    await this.database.db.userSettings.put({ ...current, deletedAt: now, updatedAt: now, syncStatus: 'PENDING', version: current.version + 1 })
+    await this.database.transaction(async () => {
+      const record = { ...current, deletedAt: now, updatedAt: now, syncStatus: 'PENDING' as const, version: current.version + 1 }
+      await this.database.db.userSettings.put(record)
+      await this.queue.enqueueWithinTransaction({ entityType: 'USER_SETTING', entityId: id, operation: 'DELETE', payload: record,
+        baseVersion: current.version, baseUpdatedAt: current.updatedAt })
+    })
     return true
   }
 }
