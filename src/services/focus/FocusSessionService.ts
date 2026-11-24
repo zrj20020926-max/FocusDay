@@ -123,7 +123,8 @@ export class FocusSessionService {
 
   getSummaryForDay(date: Date): FocusSummary {
     const start = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-    return this.getSummaryForRange(start, start + 24 * 60 * 60 * 1000)
+    const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime()
+    return this.getSummaryForRange(start, end)
   }
 
   private summarize(sessions: FocusSession[]): FocusSummary {

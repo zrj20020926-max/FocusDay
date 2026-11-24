@@ -13,7 +13,7 @@ import type {
 import { migrateLocalStorage } from './migrations/localStorageMigration'
 
 export const DATABASE_NAME = 'focus-day'
-export const DATABASE_VERSION = 4
+export const DATABASE_VERSION = 5
 
 export class FocusDayDatabase extends Dexie {
   tasks!: EntityTable<TaskRecord, 'id'>
@@ -53,7 +53,7 @@ export class FocusDayDatabase extends Dexie {
         this.addSyncMetadata(transaction, 'syncMetadata', now),
       ])
     })
-    this.version(DATABASE_VERSION).stores({
+    this.version(4).stores({
       tasks: 'id, status, categoryId, plannedDate, dueDate, sortOrder, updatedAt, deletedAt, syncStatus, [status+sortOrder]',
       categories: 'id, name, updatedAt, deletedAt, syncStatus',
       focusSessions: 'id, taskId, status, mode, startTime, endTime, createdAt, deletedAt, syncStatus, [taskId+endTime]',
@@ -74,6 +74,16 @@ export class FocusDayDatabase extends Dexie {
         record.lastError ??= null
         record.updatedAt ??= now
       })
+    })
+    this.version(DATABASE_VERSION).stores({
+      tasks: 'id, status, categoryId, plannedDate, dueDate, completedAt, sortOrder, updatedAt, deletedAt, syncStatus, [status+sortOrder]',
+      categories: 'id, name, updatedAt, deletedAt, syncStatus',
+      focusSessions: 'id, taskId, status, mode, startTime, endTime, sourceRecordId, createdAt, deletedAt, syncStatus, [taskId+endTime]',
+      timerStates: 'id, updatedAt, deletedAt, syncStatus',
+      userSettings: 'id, updatedAt, deletedAt, syncStatus',
+      syncQueue: 'id, entityType, entityId, operation, status, createdAt, updatedAt, deletedAt, syncStatus, nextAttemptAt, [entityType+entityId]',
+      syncMetadata: 'id, updatedAt, deletedAt, syncStatus',
+      syncConflicts: 'id, entityType, entityId, winner, reason, createdAt, deletedAt, [entityType+entityId]',
     })
   }
 
