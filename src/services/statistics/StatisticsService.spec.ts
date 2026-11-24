@@ -31,6 +31,11 @@ describe('StatisticsService', () => {
     const result = await service.getDashboard({ now: Date.parse('2024-03-13T12:00:00Z'), timeZone: 'UTC' })
     expect(result).toMatchObject({ todayFocusDuration: 3_600_000, todayCompletedTasks: 1, totalCompletedPomodoros: 1,
       dailyGoalDuration: 1_800_000, taskCompletionRate: 1 })
+    const page = await service.getPageData('WEEK', { now: Date.parse('2024-03-13T12:00:00Z'), timeZone: 'UTC' })
+    expect(page).toMatchObject({ range: 'WEEK', focusDuration: 3_600_000, completedTasks: 1, completedPomodoros: 1,
+      totalTasks: 1, totalCompletedTasks: 1, taskCompletionRate: 1, empty: false })
+    expect(page.categories[0]).toMatchObject({ name: '工作', duration: 3_600_000 })
+    expect(page.records[0]).toMatchObject({ taskTitle: '完成', dates: ['2024-03-13'] })
     service.dispose()
   })
 

@@ -44,3 +44,51 @@ export interface StatisticsDashboard {
 }
 
 export const DEFAULT_DAILY_FOCUS_GOAL = 2 * 60 * 60 * 1000
+
+export const STATISTICS_RANGES = ['TODAY', 'WEEK', 'MONTH', 'ALL'] as const
+export type StatisticsRange = (typeof STATISTICS_RANGES)[number]
+
+export interface StatisticsTrendPoint {
+  key: string
+  label: string
+  duration: number
+  completedTasks: number
+  completedPomodoros: number
+  focusCount: number
+  start: number
+  end: number
+}
+
+export interface StatisticsFocusRecord {
+  id: string
+  date: string
+  dates: string[]
+  startTime: number
+  endTime: number
+  duration: number
+  mode: FocusSession['mode']
+  taskId: string | null
+  taskTitle: string
+  categoryId: string | null
+  categoryName: string
+  categoryColor: string
+  completedPomodoros: number
+}
+
+export interface StatisticsPageData {
+  range: StatisticsRange
+  rangeLabel: string
+  start: number
+  end: number
+  focusDuration: number
+  completedTasks: number
+  completedPomodoros: number
+  focusStreakDays: number
+  totalTasks: number
+  totalCompletedTasks: number
+  taskCompletionRate: number
+  trend: StatisticsTrendPoint[]
+  categories: CategoryFocusMetric[]
+  records: StatisticsFocusRecord[]
+  empty: boolean
+}

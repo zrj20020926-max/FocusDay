@@ -1,49 +1,112 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import VChart from 'vue-echarts'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { LineChart, PieChart, HeatmapChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
-import { Clock3, CheckCircle2, Flame, TrendingUp, ChevronDown, Info } from 'lucide-vue-next'
-import { useTaskStore } from '../stores/taskStore'
-import { useFocusSessionStore } from '../stores/focusSessionStore'
-import { StatisticsCalculator, addCalendarDays, dateKeyAt, resolvedTimeZone, weekStartKey } from '../services/statistics/StatisticsCalculator'
-use([CanvasRenderer,LineChart,PieChart,HeatmapChart,GridComponent,TooltipComponent,VisualMapComponent])
-const taskStore = useTaskStore()
-const focusStore = useFocusSessionStore()
-const timeZone = resolvedTimeZone()
-const formatDuration = (duration:number) => `${Math.floor(duration/3600000)}h ${Math.floor(duration%3600000/60000)}m`
-const weekdayLabel = (key:string) => { const [year,month,day]=key.split('-').map(Number); return ['周日','周一','周二','周三','周四','周五','周六'][new Date(Date.UTC(year,month-1,day)).getUTCDay()] }
-const todayKey = computed(() => dateKeyAt(Date.now(), timeZone))
-const statisticsInput = computed(() => ({ tasks: taskStore.tasks, categories: taskStore.categories, sessions: focusStore.sessions }))
-const dashboard = computed(() => StatisticsCalculator.calculate(statisticsInput.value, { timeZone }))
-const todayFocus = computed(() => formatDuration(dashboard.value.todayFocusDuration))
-const weekKey = computed(() => weekStartKey(todayKey.value))
-const weekPoints = computed(() => StatisticsCalculator.dailySeries(focusStore.sessions, weekKey.value, addCalendarDays(weekKey.value, 7), timeZone))
-const weekSummary = computed(() => ({ duration: dashboard.value.weekFocusDuration,
-  focusCount: weekPoints.value.reduce((sum,item)=>sum+item.focusCount,0), completedPomodoros: weekPoints.value.reduce((sum,item)=>sum+item.completedPomodoros,0) }))
-const trendDays = computed(() => StatisticsCalculator.dailySeries(focusStore.sessions, addCalendarDays(todayKey.value,-6), addCalendarDays(todayKey.value,1), timeZone).map((item,index)=>({
-  start: item.date, label: index===6?'今天':weekdayLabel(item.date), duration:item.duration })))
-const categoryData = computed(() => {
-  return StatisticsCalculator.categoryDurations(statisticsInput.value,weekKey.value,addCalendarDays(weekKey.value,7),timeZone)
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { CalendarDays, CheckCircle2, Clock3, Flame, Info, RefreshCw, Target, TimerReset, TrendingUp } from 'lucide-vue-next'
+import CategoryDonutChart from '../components/statistics/CategoryDonutChart.vue'
+import FocusTrendChart from '../components/statistics/FocusTrendChart.vue'
+import StatisticsRangeTabs from '../components/statistics/StatisticsRangeTabs.vue'
+import StatisticsRecordList from '../components/statistics/StatisticsRecordList.vue'
+import TaskCompletionChart from '../components/statistics/TaskCompletionChart.vue'
+import { statisticsService } from '../services/statistics/StatisticsService'
+import type { CategoryFocusMetric, StatisticsPageData, StatisticsRange, StatisticsTrendPoint } from '../services/statistics/StatisticsTypes'
+
+type DetailFilter = { type: 'date'; point: StatisticsTrendPoint } | { type: 'category'; item: CategoryFocusMetric }
+
+const range = ref<StatisticsRange>('WEEK')
+const data = ref<StatisticsPageData | null>(null)
+const loading = ref(true)
+const error = ref('')
+const detail = ref<DetailFilter | null>(null)
+let requestId = 0
+
+const durationLabel = (duration: number) => {
+  const hours = Math.floor(duration / 3_600_000)
+  const minutes = Math.round(duration % 3_600_000 / 60_000)
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`
+}
+const trendTitle = computed(() => range.value === 'TODAY' ? '今日专注' : range.value === 'WEEK' ? '本周每日趋势' : range.value === 'MONTH' ? '本月每日趋势' : '月度专注趋势')
+const selectedRecords = computed(() => {
+  const selectedDetail = detail.value
+  if (!data.value || !selectedDetail) return []
+  if (selectedDetail.type === 'date') return data.value.records.filter(record => range.value === 'ALL'
+    ? record.dates.some(date => date.startsWith(selectedDetail.point.key)) : record.dates.includes(selectedDetail.point.key))
+  const selected = selectedDetail.item
+  return data.value.records.filter(record => record.categoryId === selected.categoryId && record.categoryName === selected.name)
 })
-const categoryTotal = computed(() => categoryData.value.reduce((sum,item)=>sum+item.duration,0))
-const tooltip={backgroundColor:'#333a34',borderWidth:0,textStyle:{color:'#fff',fontSize:12},padding:[8,12],extraCssText:'border-radius:9px;box-shadow:0 8px 24px rgba(30,35,30,.15)'}
-const trendOption=computed(()=>({tooltip:{...tooltip,trigger:'axis',valueFormatter:(value:number)=>`${Math.round(value*60)} 分钟`},grid:{left:12,right:12,top:20,bottom:28,containLabel:true},xAxis:{type:'category',boundaryGap:false,data:trendDays.value.map(item=>item.label),axisLine:{lineStyle:{color:'#e8e5dc'}},axisTick:{show:false},axisLabel:{color:'#8c8c80',margin:12}},yAxis:{type:'value',min:0,max:Math.max(1,Math.ceil(Math.max(...trendDays.value.map(item=>item.duration/3600000)))),interval:1,axisLabel:{formatter:'{value}h',color:'#aaa99e'},splitLine:{lineStyle:{color:'#eeeae1',type:'dashed'}}},series:[{type:'line',smooth:.42,data:trendDays.value.map(item=>Number((item.duration/3600000).toFixed(2))),symbolSize:8,showSymbol:false,lineStyle:{width:3,color:'#92aa8b'},itemStyle:{color:'#92aa8b',borderColor:'#faf9f5',borderWidth:3},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(146,170,139,.28)'},{offset:1,color:'rgba(146,170,139,0)'}]}}}]}))
-const pieOption=computed(()=>({tooltip:{...tooltip,trigger:'item',formatter:(p:any)=>`${p.name}<br/>${Math.round(p.value*60)} 分钟 · ${p.percent}%`},series:[{type:'pie',radius:['62%','83%'],center:['50%','50%'],padAngle:3,itemStyle:{borderRadius:6},label:{show:false},data:categoryData.value.map(item=>({value:Number((item.duration/3600000).toFixed(3)),name:item.name,itemStyle:{color:item.color}}))}]}))
-const heatData=computed(()=>{const first=addCalendarDays(weekKey.value,-17*7);return StatisticsCalculator.dailySeries(focusStore.sessions,first,addCalendarDays(first,126),timeZone).map((item,index)=>{const minutes=Math.round(item.duration/60000);return[Math.floor(index/7),index%7,Math.min(5,Math.ceil(minutes/30)),minutes]})})
-const heatOption=computed(()=>({tooltip:{...tooltip,formatter:(p:any)=>`${p.value[3]} 分钟专注`},grid:{left:2,right:2,top:2,bottom:2},xAxis:{type:'category',data:Array.from({length:18},(_,i)=>i),show:false},yAxis:{type:'category',data:Array.from({length:7},(_,i)=>i),show:false},visualMap:{show:false,min:0,max:5,inRange:{color:['#efede6','#dbe4d8','#c1d2bc','#a4bc9e','#799574','#587252']}},series:[{type:'heatmap',data:heatData.value,itemStyle:{borderColor:'#faf9f5',borderWidth:4,borderRadius:3}}]}))
-const bestDay = computed(() => [...trendDays.value].sort((a,b)=>b.duration-a.duration)[0])
+const detailTitle = computed(() => detail.value?.type === 'date' ? `${detail.value.point.label}的专注记录` : detail.value ? `${detail.value.item.name}分类记录` : '')
+
+async function load() {
+  const current = ++requestId
+  loading.value = true
+  error.value = ''
+  try {
+    const result = await statisticsService.getPageData(range.value)
+    if (current === requestId) data.value = result
+  } catch {
+    if (current === requestId) error.value = '统计数据暂时无法读取，请稍后重试'
+  } finally { if (current === requestId) loading.value = false }
+}
+function selectDate(point: StatisticsTrendPoint) { detail.value = { type: 'date', point } }
+function selectCategory(item: CategoryFocusMetric) { detail.value = { type: 'category', item } }
+function onDataSynced() { statisticsService.invalidate(); void load() }
+
+watch(range, () => { detail.value = null; void load() })
+onMounted(() => { window.addEventListener('focus-day:data-synced', onDataSynced); void load() })
+onUnmounted(() => window.removeEventListener('focus-day:data-synced', onDataSynced))
 </script>
 
 <template>
-  <div class="page stats-page">
-    <header class="page-header stats-header"><div><span class="eyebrow">INSIGHTS</span><h1>专注回顾</h1><p>温柔地回看每一份努力，找到属于你的节奏。</p></div><button class="period-select">本周 <ChevronDown :size="16"/></button></header>
-    <section class="stat-cards"><div><span class="metric-icon green"><Clock3 :size="19"/></span><p>今日专注</p><strong>{{todayFocus}}</strong><small>{{weekPoints.find(item=>item.date===todayKey)?.focusCount ?? 0}} 次有效专注</small></div><div><span class="metric-icon blue"><Flame :size="19"/></span><p>本周专注</p><strong>{{formatDuration(weekSummary.duration)}}</strong><small>完成 {{weekSummary.completedPomodoros}} 个番茄钟</small></div><div><span class="metric-icon gold"><CheckCircle2 :size="19"/></span><p>完成任务</p><strong>{{ dashboard.todayCompletedTasks }}</strong><small class="positive"><TrendingUp :size="13"/>数据已与任务页同步</small></div></section>
-    <section class="chart-grid"><div class="chart-card trend-card"><div class="section-heading"><div><h3>专注趋势</h3><p>过去 7 天的专注时长</p></div><span class="chart-total">{{formatDuration(weekSummary.duration)}} <small>本周累计</small></span></div><VChart :option="trendOption" autoresize class="trend-chart"/></div>
-      <div class="chart-card category-chart"><div class="section-heading"><div><h3>时间分配</h3><p>不同分类的专注占比</p></div><Info :size="16"/></div><div class="pie-wrap"><VChart :option="pieOption" autoresize/><div class="pie-center"><strong>{{formatDuration(categoryTotal)}}</strong><span>总计</span></div></div><div class="legend"><span v-for="item in categoryData" :key="item.name"><i :style="{background:item.color}"/>{{item.name}} <b>{{categoryTotal?Math.round(item.duration/categoryTotal*100):0}}%</b></span><span v-if="!categoryData.length">暂无有效记录</span></div></div>
-    </section>
-    <section class="chart-card heat-card"><div class="section-heading"><div><h3>专注足迹</h3><p>过去 18 周，坚持让时间留下痕迹</p></div><div class="heat-legend"><span>少</span><i/><i/><i/><i/><i/><span>多</span></div></div><div class="heat-content"><div class="week-labels"><span>一</span><span>三</span><span>五</span><span>日</span></div><VChart :option="heatOption" autoresize class="heat-chart"/></div><div class="insight-note"><span>🌿</span><p><strong>{{bestDay.duration?`最近的专注高峰是${bestDay.label}`:'完成一次专注后，这里会出现你的节奏洞察'}}</strong>{{bestDay.duration?'这一天累计专注 '+Math.round(bestDay.duration/60000)+' 分钟。':'所有图表均来自真实专注记录。'}}</p></div></section>
+  <div class="page stats-page analytics-page">
+    <header class="page-header stats-header analytics-header">
+      <div><span class="eyebrow">INSIGHTS</span><h1>专注回顾</h1><p>从真实记录里，看见时间慢慢积累的方向。</p></div>
+      <StatisticsRangeTabs v-model="range" :disabled="loading" />
+    </header>
+
+    <div v-if="error" class="stats-error"><Info :size="18"/><span>{{ error }}</span><button @click="load"><RefreshCw :size="15"/>重新加载</button></div>
+
+    <div v-if="loading && !data" class="stats-skeleton" aria-label="正在加载统计数据">
+      <div v-for="index in 4" :key="index"/><div class="wide"/><div/><div class="wide"/>
+    </div>
+
+    <transition v-else-if="data" name="stats-fade" mode="out-in">
+      <div :key="range" class="stats-content" :class="{ refreshing: loading }">
+        <section class="analytics-metrics">
+          <article><span class="metric-symbol green"><Clock3 :size="19"/></span><div><p>专注总时长</p><strong>{{ durationLabel(data.focusDuration) }}</strong><small>{{ data.rangeLabel }}累计</small></div></article>
+          <article><span class="metric-symbol blue"><CheckCircle2 :size="19"/></span><div><p>完成任务数</p><strong>{{ data.completedTasks }}</strong><small>{{ data.rangeLabel }}完成</small></div></article>
+          <article><span class="metric-symbol sand"><TimerReset :size="19"/></span><div><p>完成番茄钟</p><strong>{{ data.completedPomodoros }}</strong><small>有效专注轮次</small></div></article>
+          <article><span class="metric-symbol coral"><Flame :size="19"/></span><div><p>连续专注</p><strong>{{ data.focusStreakDays }}<i>天</i></strong><small>保持自己的节奏</small></div></article>
+        </section>
+
+        <section class="analytics-grid">
+          <article class="analytics-card trend-analytics-card">
+            <header class="analytics-card-heading"><div><span class="card-kicker"><TrendingUp :size="14"/>FOCUS TREND</span><h2>{{ trendTitle }}</h2><p>点击数据点查看当天的专注记录</p></div><strong>{{ durationLabel(data.focusDuration) }}<small>{{ data.rangeLabel }}总计</small></strong></header>
+            <FocusTrendChart v-if="data.trend.some(item => item.duration > 0)" :points="data.trend" :range="range" @select="selectDate"/>
+            <div v-else class="chart-empty large"><span><CalendarDays :size="24"/></span><strong>这段时间还没有专注记录</strong><p>开始一次专注后，时间趋势会在这里自然生长。</p></div>
+          </article>
+
+          <article class="analytics-card category-analytics-card">
+            <header class="analytics-card-heading compact"><div><span class="card-kicker"><Target :size="14"/>TIME SHARE</span><h2>分类时间占比</h2><p>点击分类筛选专注记录</p></div></header>
+            <CategoryDonutChart :items="data.categories" @select="selectCategory"/>
+            <div v-if="data.categories.length" class="analytics-legend">
+              <button v-for="item in data.categories" :key="`${item.categoryId}-${item.name}`" @click="selectCategory(item)"><i :style="{ background: item.color }"/><span>{{ item.name }}</span><b>{{ Math.round(item.percentage * 100) }}%</b></button>
+            </div>
+          </article>
+
+          <article class="analytics-card task-analytics-card">
+            <header class="analytics-card-heading"><div><span class="card-kicker"><CheckCircle2 :size="14"/>TASK COMPLETION</span><h2>任务完成分析</h2><p>每日完成任务数量与整体完成率</p></div><strong>{{ Math.round(data.taskCompletionRate * 100) }}%<small>当前完成率</small></strong></header>
+            <div class="task-analysis-body">
+              <div class="completion-ring" :style="{ '--completion': `${Math.round(data.taskCompletionRate * 100) * 3.6}deg` }"><div><strong>{{ data.totalCompletedTasks }}</strong><span>/ {{ data.totalTasks }} 个任务</span></div></div>
+              <TaskCompletionChart v-if="data.trend.some(item => item.completedTasks > 0)" :points="data.trend"/>
+              <div v-else class="chart-empty task-empty"><strong>暂无完成记录</strong><p>完成任务后会形成每日趋势。</p></div>
+            </div>
+          </article>
+
+          <article class="analytics-card rhythm-card">
+            <div class="rhythm-mark"><Flame :size="22"/></div><div><span class="card-kicker">CURRENT RHYTHM</span><h2>{{ data.focusStreakDays ? `已连续专注 ${data.focusStreakDays} 天` : '从今天开始积累节奏' }}</h2><p>{{ data.focusStreakDays ? '持续并不意味着用力过猛，稳定地回来就很好。' : '一次短暂但完整的专注，也值得被记录。' }}</p></div>
+          </article>
+        </section>
+
+        <transition name="record-panel"><StatisticsRecordList v-if="detail" :title="detailTitle" :records="selectedRecords" @close="detail = null"/></transition>
+      </div>
+    </transition>
   </div>
 </template>

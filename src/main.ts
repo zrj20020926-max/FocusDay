@@ -9,5 +9,6 @@ import './responsive.css'
 import './polish.css'
 import './detail-polish.css'
 import './auth.css'
+import './statistics.css'
 
 createApp(App).use(createPinia()).use(router).mount('#app')
