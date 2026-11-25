@@ -4,6 +4,7 @@ export const useAppStore = defineStore('app', {
   state: () => ({
     commandOpen: false,
     taskDrawerOpen: false,
+    taskCreateOpen: false,
     selectedTaskId: null as string | null,
     rightPanelOpen: true,
     focusFullscreen: false,

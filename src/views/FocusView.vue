@@ -5,6 +5,7 @@ import AmbientMixer from '../components/focus/AmbientMixer.vue'
 import FocusScene from '../components/focus/FocusScene.vue'
 import ImmersiveTimer from '../components/focus/ImmersiveTimer.vue'
 import { useTimer } from '../composables/useTimer'
+import { isMobileLayout } from '../composables/mobileLayout'
 import { FullscreenError, FullscreenService } from '../services/fullscreen/FullscreenService'
 import { useAmbientStore } from '../stores/ambientStore'
 import { useAppStore } from '../stores/app'
@@ -46,6 +47,11 @@ async function enterFullscreen() {
     await fullscreenService.enter(focusRoot.value)
     store.focusFullscreen = true; ambient.setFullscreenPreferred(true)
   } catch (error) {
+    if (isMobileLayout.value && error instanceof FullscreenError) {
+      store.focusFullscreen = true
+      ambient.setFullscreenPreferred(true)
+      return
+    }
     store.focusFullscreen = false
     store.notify(error instanceof FullscreenError ? error.message : '无法进入全屏模式')
   }
@@ -83,14 +89,14 @@ onUnmounted(() => {
     </header>
 
     <div v-if="!store.focusFullscreen" class="mode-switch"><button v-for="(item,key) in modeMap" :key="key" :class="{ active: state.mode === key }" @click="selectMode(key as TimerMode)"><span>{{ item.label }}</span><small>{{ item.sub }}</small></button></div>
-    <label v-if="!store.focusFullscreen && state.mode === 'COUNTDOWN' && !['RUNNING','PAUSED'].includes(state.status)" class="countdown-duration">目标时长 <input v-model.number="countdownMinutes" type="number" min="1" max="1440" @change="saveCountdown"/> 分钟</label>
+    <label v-if="!store.focusFullscreen && state.mode === 'COUNTDOWN' && !['RUNNING','PAUSED'].includes(state.status)" class="countdown-duration">目标时长 <input v-model.number="countdownMinutes" type="number" inputmode="numeric" min="1" max="1440" @change="saveCountdown"/> 分钟</label>
 
     <ImmersiveTimer :state="state" :display-time="displayTime" :progress="progress" :is-running="isRunning" :phase-label="phaseLabel"
       :tasks="focusableTasks" :habits="focusableHabits" :fullscreen="store.focusFullscreen" @set-task="timer.setTask" @set-habit="timer.setHabit" @toggle="timer.toggle" @finish="timer.finish"
       @cancel="timer.cancel" @reset="timer.reset" @enter-fullscreen="enterFullscreen"/>
 
-    <section v-if="!store.focusFullscreen" class="focus-bottom immersive-focus-bottom">
-      <div class="session-plan"><div class="section-heading"><h3>本次番茄节奏</h3><span>{{ state.completedPomodoros }} / {{ timer.config.pomodoro.longBreakEvery }} 轮</span></div><div class="rounds"><span v-for="round in timer.config.pomodoro.longBreakEvery" :key="round" :class="{ done: round < state.currentRound, active: round === state.currentRound }">{{ round < state.currentRound ? '✓' : round }}</span></div><p>第 {{ timer.config.pomodoro.longBreakEvery }} 轮完成后进入长休息。</p></div>
+    <section v-if="!store.focusFullscreen" class="focus-bottom immersive-focus-bottom" :class="{ 'focus-bottom-single': state.mode !== 'POMODORO' }">
+      <div v-if="state.mode === 'POMODORO'" class="session-plan"><div class="section-heading"><h3>本次番茄节奏</h3><span>{{ state.completedPomodoros }} / {{ timer.config.pomodoro.longBreakEvery }} 轮</span></div><div class="rounds"><span v-for="round in timer.config.pomodoro.longBreakEvery" :key="round" :class="{ done: round < state.currentRound, active: round === state.currentRound }">{{ round < state.currentRound ? '✓' : round }}</span></div><p>第 {{ timer.config.pomodoro.longBreakEvery }} 轮完成后进入长休息。</p></div>
       <AmbientMixer/>
     </section>
     <div v-else class="fullscreen-sound-dock"><AmbientMixer compact/></div>

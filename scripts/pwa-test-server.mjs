@@ -17,7 +17,7 @@ if (build.status !== 0) process.exit(build.status ?? 1)
 const user = { id: '21bf127b-f949-44d0-ac90-3397bb80aba4', aud: 'authenticated', email: 'pwa@example.test', role: 'authenticated',
   app_metadata: {}, user_metadata: { display_name: '离线测试账号' }, created_at: '2026-01-01T00:00:00.000Z' }
 const tables = Object.fromEntries(['categories', 'tasks', 'focus_sessions', 'habits', 'habit_records', 'timer_states', 'user_settings'].map(key => [key, []]))
-const appRoutes = new Set(['/', '/tasks', '/focus', '/habits', '/stats', '/achievements', '/categories', '/settings', '/account'])
+const appRoutes = new Set(['/', '/tasks', '/focus', '/habits', '/stats', '/achievements', '/categories', '/settings', '/account', '/me'])
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png',
   '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2' }
 let revision = 0

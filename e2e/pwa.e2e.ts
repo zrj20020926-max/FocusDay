@@ -139,8 +139,8 @@ test('update waits for confirmation and restores running timer plus pending task
   expect(await queuedTask(page, '更新前待同步')).not.toBeNull()
 })
 
-test('320px touch viewport keeps navigation, task editor and charts usable', async ({ browser, baseURL }) => {
-  const mobile = await browser.newContext({ baseURL, viewport: { width: 320, height: 680 }, isMobile: true, hasTouch: true })
+test('360px touch viewport keeps navigation, task editor and charts usable', async ({ browser, baseURL }) => {
+  const mobile = await browser.newContext({ baseURL, viewport: { width: 360, height: 680 }, isMobile: true, hasTouch: true })
   try {
     const page = await mobile.newPage()
     await page.goto('/')
@@ -153,17 +153,27 @@ test('320px touch viewport keeps navigation, task editor and charts usable', asy
     await title.focus()
     expect(await title.evaluate(node => Number.parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(16)
     await page.getByTitle('关闭', { exact: true }).tap()
-    for (const route of ['/tasks', '/stats', '/focus', '/settings']) {
+    for (const route of ['/tasks', '/stats', '/focus', '/me', '/settings']) {
       await page.goto(route)
       await expect(page.locator('.page')).toBeVisible()
       const dimensions = await page.evaluate(() => ({
         width: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
-        navBottom: Math.round(document.querySelector('.sidebar')!.getBoundingClientRect().bottom),
+        navBottom: Math.round(document.querySelector('.mobile-navigation')!.getBoundingClientRect().bottom),
         height: innerHeight,
       }))
       expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width)
       expect(dimensions.navBottom).toBe(dimensions.height)
     }
   } finally { await mobile.close() }
+})
+
+test('desktop keeps a three-column workspace', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/')
+  await expect(page.locator('.sidebar')).toBeVisible()
+  await expect(page.locator('.right-panel')).toBeVisible()
+  await expect(page.locator('.mobile-navigation')).toBeHidden()
+  const columns = await page.locator('.app-shell').evaluate(shell => getComputedStyle(shell).gridTemplateColumns.split(' '))
+  expect(columns).toHaveLength(3)
 })

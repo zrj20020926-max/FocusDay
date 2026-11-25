@@ -1,7 +1,7 @@
 // Smoke test for an already installed Debug APK on a disposable Android emulator.
 import { execFileSync } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
-import { chromium } from '@playwright/test'
+import { chromium, expect } from '@playwright/test'
 
 const serial = process.env.ANDROID_SERIAL
 if (!serial || !/^emulator-\d+$/.test(serial)) throw new Error('Set ANDROID_SERIAL to a disposable emulator (e.g. emulator-5554).')
@@ -42,7 +42,30 @@ adb('shell', 'am', 'force-stop', packageName)
 adb('shell', 'am', 'start', '-W', '-n', `${packageName}/.MainActivity`)
 await usingWebView(async page => {
   await page.getByPlaceholder('添加一个任务，按 Enter 保存').waitFor({ timeout: 15_000 })
-  await page.getByRole('link', { name: '任务', exact: true }).click()
+  const nav = page.getByRole('navigation', { name: '移动端主导航' })
+  await expect(nav.getByRole('link')).toHaveText(['今日', '任务', '专注', '统计', '我的'])
+  await page.getByRole('button', { name: '新建任务' }).click()
+  const create = page.getByRole('dialog', { name: '新建任务' })
+  await expect(create).toBeVisible()
+  const titleBox = await create.getByRole('textbox', { name: '任务名称' }).boundingBox()
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: titleBox.x + 16, y: titleBox.y + titleBox.height / 2 }] })
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await cdp.detach()
+  await expect(page.locator('html')).toHaveAttribute('data-keyboard-open')
+  await expect(create.getByRole('button', { name: '创建任务' })).toBeInViewport()
+  adb('shell', 'input', 'keyevent', '4')
+  await expect(page.locator('html')).not.toHaveAttribute('data-keyboard-open')
+  await expect(create).toBeVisible()
+  adb('shell', 'input', 'keyevent', '4')
+  await expect(create).toBeHidden()
+  await nav.getByRole('link', { name: '任务', exact: true }).click()
+  await heading(page, '所有任务')
+  await page.locator('.mobile-task-content').first().click()
+  const drawer = page.getByRole('dialog', { name: '任务详情' })
+  await expect(drawer).toBeVisible()
+  adb('shell', 'input', 'keyevent', '4')
+  await expect(drawer).toBeHidden()
   await heading(page, '所有任务')
   await page.reload()
   await heading(page, '所有任务')
@@ -52,9 +75,20 @@ await usingWebView(async page => {
   }
   adb('shell', 'input', 'keyevent', '4')
   await page.getByPlaceholder('添加一个任务，按 Enter 保存').waitFor({ timeout: 15_000 })
+  await nav.getByRole('link', { name: '专注', exact: true }).click()
+  await page.locator('.focus-page').getByRole('button', { name: '开始专注', exact: true }).click()
+  const pause = page.getByRole('button', { name: '暂停一下' })
+  await expect(pause).toBeVisible()
+  await page.getByTitle('全屏专注').click()
+  await expect(page.getByRole('button', { name: '退出全屏' })).toBeVisible()
+  adb('shell', 'input', 'keyevent', '4')
+  await expect(page.getByRole('button', { name: '退出全屏' })).toBeHidden()
+  await expect(nav).toBeVisible()
+  await expect(pause).toBeVisible()
+  await page.getByRole('button', { name: '放弃本次计时' }).click()
   openAuth()
   await heading(page, '欢迎回到 Focus Day')
-  console.log('Android home, deep-route reload, native Back, warm auth link and no PWA worker: OK')
+  console.log('Android mobile navigation, IME, native Back for sheets and focus, deep-route reload, warm auth link and no PWA worker: OK')
 })
 
 adb('shell', 'am', 'force-stop', packageName)

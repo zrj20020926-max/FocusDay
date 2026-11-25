@@ -46,7 +46,7 @@ export default defineConfig(({ mode }) => {
           // Only Vite build output and bundled icons. No runtime HTTP caching.
           globPatterns: ['index.html', 'assets/**/*.{js,css,woff,woff2}', 'icons/*.{png,svg}'],
           navigateFallback: '/index.html',
-          navigateFallbackAllowlist: [/^\/(?:tasks|focus|habits|stats|achievements|categories|settings|account)?\/?(?:\?.*)?$/],
+          navigateFallbackAllowlist: [/^\/(?:tasks|focus|habits|stats|achievements|categories|settings|account|me)?\/?(?:\?.*)?$/],
           cleanupOutdatedCaches: true,
           importScripts: ['sw-notification.js'],
           clientsClaim: true,

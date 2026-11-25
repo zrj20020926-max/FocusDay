@@ -17,6 +17,7 @@ import './notifications.css'
 import './achievements.css'
 import './themes.css'
 import './pwa.css'
+import './mobile.css'
 
 primeTheme()
 createApp(App).use(createPinia()).use(router).mount('#app')

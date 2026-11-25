@@ -11,6 +11,8 @@ import { useHabitStore } from './stores/habitStore'
 import { useAchievementStore } from './stores/achievementStore'
 import { useThemeStore } from './stores/themeStore'
 import AppSidebar from './components/AppSidebar.vue'
+import MobileNavigation from './components/MobileNavigation.vue'
+import MobileTaskCreate from './components/mobile/MobileTaskCreate.vue'
 import RightPanel from './components/RightPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
@@ -25,6 +27,8 @@ import { databaseService } from './services/database/DatabaseService'
 import { AUTH_STORAGE_KEY } from './services/supabase/client'
 import { Capacitor } from '@capacitor/core'
 import { startNativeNavigation } from './services/platform/NativeNavigation'
+import { applyNativeStatusBar } from './services/platform/NativeStatusBar'
+import { observeMobileLayout } from './composables/mobileLayout'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
@@ -45,7 +49,14 @@ let timerInterval: number
 let stopNotifications: (() => void) | undefined
 let stopPwa: (() => void) | undefined
 let stopNative: (() => void) | undefined
+const stopMobile = observeMobileLayout()
 let leaving = false
+const statusBar = () => {
+  if (!Capacitor.isNativePlatform()) return
+  const background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+  void applyNativeStatusBar(themeStore.applied === 'night' || store.focusFullscreen, store.focusFullscreen ? '#182321' : background).catch(() => undefined)
+}
+const stopStatusBar = watch(() => [themeStore.applied, store.focusFullscreen], statusBar, { flush: 'post' })
 const stopSyncWatch = watch(() => authStore.isAuthenticated, authenticated => {
   if (authenticated) void syncScheduler.start().catch(() => undefined)
   else syncScheduler.stop()
@@ -57,28 +68,31 @@ function onAuthStorage(event: StorageEvent) {
 function onKeydown(e: KeyboardEvent) {
   if (pwa.updating) { e.preventDefault(); return }
   if (e.repeat) return
-  if (habitStore.drawerOpen || habitStore.formOpen) return
+  if (habitStore.drawerOpen || habitStore.formOpen || store.taskCreateOpen) return
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); store.commandOpen = !store.commandOpen }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); store.commandOpen = true }
   if (e.key === 'Escape') {
-    if (store.focusFullscreen) store.focusFullscreen = false
-    else if (store.taskDrawerOpen) store.taskDrawerOpen = false
-    else store.commandOpen = false
+    dismissNativeOverlay()
   }
 }
 
 function dismissNativeOverlay(): boolean {
   if (pwa.updating) return true
-  const dialog = document.querySelector('dialog[open]')
+  if (document.documentElement.hasAttribute('data-keyboard-open') && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+    return true
+  }
+  const dialogs = document.querySelectorAll('dialog[open]')
+  const dialog = dialogs[dialogs.length - 1]
   if (dialog) { dialog.dispatchEvent(new Event('cancel', { cancelable: true })); return true }
-  if (store.focusFullscreen) { store.focusFullscreen = false; return true }
   if (store.commandOpen) { store.commandOpen = false; return true }
-  if (store.taskDrawerOpen) { store.closeTask(); return true }
   if (focusSessionStore.completionSessionId) { focusSessionStore.dismissCompletion(); return true }
+  if (store.taskDrawerOpen) { store.closeTask(); return true }
+  if (store.focusFullscreen) { store.focusFullscreen = false; return true }
   return false
 }
 const stopScrollWatch = watch(
-  () => store.commandOpen || store.taskDrawerOpen || habitStore.drawerOpen || habitStore.formOpen || store.focusFullscreen || !!focusSessionStore.completionSessionId,
+  () => store.commandOpen || store.taskDrawerOpen || store.taskCreateOpen || habitStore.drawerOpen || habitStore.formOpen || store.focusFullscreen || !!focusSessionStore.completionSessionId,
   locked => { document.body.style.overflow = locked ? 'hidden' : '' },
   { immediate: true }
 )
@@ -88,6 +102,7 @@ async function onDataSynced() {
     focusSessionStore.refreshFromPersistence().then(() => timerStore.refreshFromPersistence())])
 }
 onMounted(() => {
+  statusBar()
   if (Capacitor.isNativePlatform()) {
     void startNativeNavigation({
       router, dismissOverlay: dismissNativeOverlay,
@@ -116,6 +131,8 @@ onMounted(() => {
 })
 onUnmounted(() => {
   leaving = true
+  stopMobile()
+  stopStatusBar()
   stopNative?.()
   stopPwa?.()
   achievementStore.stop()
@@ -135,6 +152,7 @@ onUnmounted(() => {
 <template>
   <div class="app-shell" :class="{ 'panel-collapsed': !store.rightPanelOpen }" :inert="pwa.updating">
     <AppSidebar />
+    <MobileNavigation v-if="!store.focusFullscreen" />
     <main class="main-stage">
       <router-view v-slot="{ Component }">
         <transition name="page" mode="out-in"><component :is="Component" :key="route.path" /></transition>
@@ -144,6 +162,7 @@ onUnmounted(() => {
     <button v-else class="panel-reopen icon-button" title="展开辅助栏" @click="store.rightPanelOpen = true"><PanelRightOpen :size="19" /></button>
     <CommandPalette />
     <TaskDrawer />
+    <MobileTaskCreate />
     <FocusCompletionDialog />
     <AchievementNotice />
     <PwaUpdateNotice />

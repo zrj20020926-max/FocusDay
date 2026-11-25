@@ -17,6 +17,7 @@
     "@capacitor/android": "7.6.10",
     "@capacitor/app": "7.1.2",
     "@capacitor/core": "7.6.10",
+    "@capacitor/status-bar": "7.0.6",
     "@supabase/supabase-js": "^2.109.0",
     "@vueuse/core": "^13.9.0",
     "dexie": "^4.4.7",
