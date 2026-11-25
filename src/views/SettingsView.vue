@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Bell, Clock3, Palette, PanelRight, Volume2, Sun, Check, Cloud, RefreshCw, WifiOff, AlertCircle, Download, Upload, Trash2, LogOut, UserRound, Database } from 'lucide-vue-next'
+import { Bell, Clock3, Palette, PanelRight, Volume2, Sun, Cloud, RefreshCw, WifiOff, AlertCircle, Download, Upload, Trash2, LogOut, UserRound, Database, Trophy } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { useTimerStore } from '../stores/timerStore'
 import { useAuthStore } from '../stores/authStore'
@@ -9,6 +9,7 @@ import { dataManagementService } from '../services/data/DataManagementService'
 import { DataManagementError } from '../types/dataManagement'
 import { toUserMessage } from '../services/errors/userMessage'
 import NotificationSettings from '../components/notification/NotificationSettings.vue'
+import ThemePicker from '../components/ThemePicker.vue'
 
 const store = useAppStore()
 const timerStore = useTimerStore()
@@ -165,10 +166,8 @@ async function deleteAccount() {
         </section>
         <section id="appearance" class="setting-section">
           <div class="setting-heading"><h2>外观与布局</h2><p>选择你喜欢的界面呈现方式。</p></div>
-          <div class="theme-options">
-            <button class="theme-option selected"><span class="theme-preview warm"><i /><i /><i /></span><span><strong>暖白</strong><small>当前主题</small></span><Check :size="17" /></button>
-            <button class="theme-option"><span class="theme-preview light"><i /><i /><i /></span><span><strong>明亮</strong><small>更高对比度</small></span></button>
-          </div>
+          <ThemePicker />
+          <router-link to="/achievements" class="setting-row selectable"><span class="setting-icon"><Trophy :size="18" /></span><div><strong>成就</strong><small>查看解锁记录与里程碑进度</small></div></router-link>
           <div class="setting-row">
             <span class="setting-icon"><PanelRight :size="18" /></span>
             <div><strong>默认显示辅助栏</strong><small>启动时展示计时器与今日概览</small></div>

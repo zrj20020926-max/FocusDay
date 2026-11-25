@@ -8,11 +8,14 @@ import { useFocusSessionStore } from './stores/focusSessionStore'
 import { useAuthStore } from './stores/authStore'
 import { useAmbientStore } from './stores/ambientStore'
 import { useHabitStore } from './stores/habitStore'
+import { useAchievementStore } from './stores/achievementStore'
+import { useThemeStore } from './stores/themeStore'
 import AppSidebar from './components/AppSidebar.vue'
 import RightPanel from './components/RightPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import FocusCompletionDialog from './components/FocusCompletionDialog.vue'
+import AchievementNotice from './components/achievement/AchievementNotice.vue'
 import { PanelRightOpen } from 'lucide-vue-next'
 import { syncScheduler } from './services/sync/SyncScheduler'
 import { startNotifications } from './services/notification/notificationRuntime'
@@ -24,6 +27,9 @@ const focusSessionStore = useFocusSessionStore()
 const authStore = useAuthStore()
 const ambientStore = useAmbientStore()
 const habitStore = useHabitStore()
+const achievementStore = useAchievementStore()
+const themeStore = useThemeStore()
+themeStore.start()
 const route = useRoute()
 void taskStore.initialize()
 void authStore.initialize()
@@ -53,6 +59,7 @@ async function onDataSynced() {
     focusSessionStore.refreshFromPersistence().then(() => timerStore.refreshFromPersistence())])
 }
 onMounted(() => {
+  achievementStore.start()
   const refreshTimer = () => { void timerStore.tick() }
   stopNotifications = startNotifications(store.notify, refreshTimer, subscribeToTimerCompletions)
   void timerStore.initialize()
@@ -65,6 +72,8 @@ onMounted(() => {
   void syncScheduler.start()
 })
 onUnmounted(() => {
+  achievementStore.stop()
+  themeStore.stop()
   stopNotifications?.()
   window.clearInterval(timerInterval)
   clearInterval(habitDateInterval)
@@ -89,6 +98,7 @@ onUnmounted(() => {
     <CommandPalette />
     <TaskDrawer />
     <FocusCompletionDialog />
+    <AchievementNotice />
     <transition name="toast"><div v-if="store.toast" class="toast"><span class="toast-dot">✓</span>{{ store.toast }}</div></transition>
   </div>
 </template>

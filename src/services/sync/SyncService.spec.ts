@@ -9,6 +9,8 @@ import type { Task, TaskCategory } from '../../types/task'
 import { HabitService } from '../habit/HabitService'
 import { HabitRepository } from '../database/repositories/HabitRepository'
 import { HabitRecordRepository } from '../database/repositories/HabitRecordRepository'
+import { AchievementRepository } from '../database/repositories/AchievementRepository'
+import { AchievementService } from '../achievement/AchievementService'
 
 type Row = Record<string, any>
 
@@ -39,8 +41,10 @@ class MemoryQuery implements PromiseLike<{ data: any; error: any }> {
       const now = new Date().toISOString()
       const inserted: Row[] = this.values.map(value => ({ created_at: now, updated_at: now, ...structuredClone(value) }))
       for (const value of inserted) {
-        const existing = this.rows.find(row => row.id === value.id || (this.table === 'habit_records' && row.user_id === value.user_id
-          && row.habit_id === value.habit_id && row.record_date === value.record_date))
+        const existing = this.rows.find(row => row.id === value.id || (row.user_id === value.user_id && (
+          (this.table === 'habit_records' && row.habit_id === value.habit_id && row.record_date === value.record_date)
+          || (this.table === 'user_settings' && row.key === value.key)
+        )))
         if (existing) return { data: [], error: { code: '23505', message: 'duplicate key' } }
         this.rows.push(value)
       }
@@ -81,6 +85,50 @@ async function setup() {
 const now = () => new Date().toISOString()
 
 describe('SyncService', () => {
+  it('同一成就由两台离线设备独立解锁后合并，第三台恢复同一记录', async () => {
+    const left = await setup()
+    const right = await setup()
+    const restored = await setup()
+    const syncFrom = (device: typeof left) => new SyncService(device.db, device.queue, device.status, async () => left.cloud as any)
+    const leftRepository = new AchievementRepository(left.db)
+    const rightRepository = new AchievementRepository(right.db)
+    const first = { definitionId: 'first-focus', unlockedAt: '2026-11-10T08:00:00.000Z' }
+    const second = { ...first, unlockedAt: '2026-11-11T08:00:00.000Z' }
+    await leftRepository.unlock(first)
+    await rightRepository.unlock(second)
+    await Promise.all([left.sync.syncNow(), syncFrom(right).syncNow()])
+    await syncFrom(restored).syncNow()
+    const rows = left.cloud.tables.user_settings
+    expect(rows).toHaveLength(1)
+    expect(rows[0].key).toBe('achievement:first-focus')
+    for (const device of [left, right, restored]) {
+      expect((await new AchievementRepository(device.db).snapshot()).records).toEqual([rows[0].value])
+      expect(await device.queue.countPending()).toBe(0)
+    }
+  })
+
+  it('同步拉取的有效专注可触发未解锁成就', async () => {
+    const { db, cloud, sync } = await setup()
+    const end = Date.parse('2026-11-08T12:00:00Z')
+    const repository = new AchievementRepository(db)
+    const service = new AchievementService(repository)
+    let unlocked = 0
+    const subscription = repository.observe().subscribe(snapshot => {
+      void service.reconcile(snapshot.activity, snapshot.records, end, 'UTC').then(result => {
+        unlocked += result.newlyUnlocked.length
+      })
+    })
+    try {
+      cloud.tables.focus_sessions.push({
+        id: crypto.randomUUID(), user_id: '00000000-0000-4000-8000-000000000001', status: 'COMPLETED', mode: 'STOPWATCH',
+        start_time: new Date(end - 60_000).toISOString(), end_time: new Date(end).toISOString(), duration: 60_000,
+        created_at: new Date(end).toISOString(), updated_at: new Date(end).toISOString(), deleted_at: null, version: 1,
+      })
+      await sync.syncNow()
+      await vi.waitFor(() => expect(unlocked).toBe(1))
+      expect((await repository.snapshot()).records).toMatchObject([{ definitionId: 'first-focus' }])
+    } finally { subscription.unsubscribe() }
+  })
   it('首次同步上传本地数据且重复同步保持幂等', async () => {
     const { repository, cloud, sync, status } = await setup()
     const category: TaskCategory = { id: crypto.randomUUID(), name: '工作', color: '#92aa8b', icon: 'Briefcase', isDefault: true, createdAt: now(), updatedAt: now() }

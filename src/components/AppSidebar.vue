@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarDays, CheckSquare2, Timer, ChartNoAxesCombined, Tags, Settings, Plus, Search, Sparkles, Sprout } from 'lucide-vue-next'
+import { CalendarDays, CheckSquare2, Timer, ChartNoAxesCombined, Tags, Settings, Plus, Search, Sparkles, Sprout, Trophy } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { useTaskStore } from '../stores/taskStore'
 import { useAuthStore } from '../stores/authStore'
@@ -27,6 +27,7 @@ const nav = [
     </nav>
     <div class="nav-label">空间</div>
     <nav class="nav-section secondary-nav">
+      <router-link to="/achievements" class="nav-item"><Trophy :size="18" /><span>成就</span></router-link>
       <router-link to="/categories" class="nav-item"><Tags :size="18" /><span>分类管理</span><span class="nav-count">{{taskStore.categories.length}}</span></router-link>
     </nav>
     <div class="sidebar-spacer" />

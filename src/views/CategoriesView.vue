@@ -52,7 +52,7 @@ async function remove(id: string) {
       <div class="setting-heading"><h2>全部分类</h2><p>删除分类后，原有任务会自动移动到“其他”，不会产生无效关联。</p></div>
       <div v-for="category in taskStore.categories" :key="category.id" class="category-row">
         <template v-if="editingId===category.id">
-          <span class="category-swatch" :style="{background:editDraft.color}">{{editDraft.icon.slice(0,1)}}</span>
+          <span class="category-swatch" :style="{ '--category-swatch': editDraft.color }">{{editDraft.icon.slice(0,1)}}</span>
           <input v-model="editDraft.name" aria-label="分类名称" />
           <label class="color-input"><input v-model="editDraft.color" type="color" aria-label="分类颜色"/><span>{{editDraft.color}}</span></label>
           <input v-model="editDraft.icon" aria-label="分类图标" />
@@ -60,7 +60,7 @@ async function remove(id: string) {
           <button class="icon-button" title="取消编辑" @click="editingId=null"><X :size="18"/></button>
         </template>
         <template v-else>
-          <span class="category-swatch" :style="{background:category.color}">{{category.icon.slice(0,1)}}</span>
+          <span class="category-swatch" :style="{ '--category-swatch': category.color }">{{category.icon.slice(0,1)}}</span>
           <span class="category-copy"><strong>{{category.name}}</strong><small>{{taskStore.tasks.filter(task=>task.categoryId===category.id).length}} 项任务 · {{category.isDefault?'默认分类':'自定义分类'}}</small></span>
           <code>{{category.color}}</code><span class="category-icon-name">{{category.icon}}</span>
           <button class="category-action" @click="beginEdit(category.id)"><Pencil :size="16"/>编辑</button>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useChartPalette } from '../../composables/useChartPalette'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -12,13 +13,14 @@ use([CanvasRenderer, PieChart, TooltipComponent])
 const props = defineProps<{ items: CategoryFocusMetric[] }>()
 const emit = defineEmits<{ select: [item: CategoryFocusMetric] }>()
 const total = computed(() => props.items.reduce((sum, item) => sum + item.duration, 0))
+const palette = useChartPalette()
 const option = computed(() => ({
   animationDuration: 520, animationDurationUpdate: 420,
-  tooltip: { trigger: 'item', backgroundColor: '#333a34', borderWidth: 0, padding: [9, 12], textStyle: { color: '#fff', fontSize: 12 },
+  tooltip: { trigger: 'item', backgroundColor: palette.value.tooltip, borderWidth: 0, padding: [9, 12], textStyle: { color: palette.value.tooltipText, fontSize: 12 },
     extraCssText: 'border-radius:10px;box-shadow:0 10px 30px rgba(30,35,30,.16)',
     formatter: (params: any) => `${params.name}<br/>${Math.round(params.value / 60000)} 分钟 · ${params.percent}%` },
   series: [{ type: 'pie', radius: ['64%', '84%'], center: ['50%', '50%'], padAngle: 3, minAngle: 3,
-    itemStyle: { borderRadius: 7, borderColor: '#faf9f5', borderWidth: 2 }, label: { show: false },
+    itemStyle: { borderRadius: 7, borderColor: palette.value.card, borderWidth: 2 }, label: { show: false },
     emphasis: { scaleSize: 7 }, data: props.items.map(item => ({ value: item.duration, name: item.name, itemStyle: { color: item.color } })) }],
 }))
 function onClick(event: any) { const item = props.items[event.dataIndex]; if (item) emit('select', item) }

@@ -3,6 +3,7 @@ import type { CategoryRecord, FocusSessionRecord, HabitEntityRecord, HabitRecord
 import type { Json } from '../../types/cloud'
 import type { SyncEntityType } from '../../types/sync'
 import { reminderKey } from '../../types/notification'
+import { isAchievementKey, readAchievement } from '../../types/achievement'
 import { DatabaseService, databaseService } from '../database/DatabaseService'
 import { getSupabaseClient } from '../supabase/client'
 import { SyncConflictResolver, type VersionedValue } from './SyncConflictResolver'
@@ -180,6 +181,7 @@ export class SyncService {
       for (const item of group.filter(item => !batched.includes(item))) {
         try {
           if (isHabitEntity(item.entityType)) await this.pushHabitItem(client, user, item)
+          else if (item.entityType === 'USER_SETTING' && isAchievementKey(item.entityId)) await this.pushAchievement(client, user, item)
           else { await this.pushItem(client, user, item); await this.queue.complete(item.id) }
         }
         catch (error) {
@@ -191,6 +193,35 @@ export class SyncService {
     }
   }
 
+  private async pushAchievement(client: Client, user: User, item: SyncQueueRecord): Promise<void> {
+    const settings = client.from(TABLES.USER_SETTING)
+    const payload = item.payload as UserSettingsRecord
+    if (!readAchievement(item.entityId, payload.value) || payload.deletedAt) {
+      throw new SyncError('成就记录格式无效', 'CONFLICT')
+    }
+    let remote = await this.findRemote(client, user.id, item)
+    if (!remote) {
+      const insert = this.toRemote(item, user.id, null)
+      delete insert.updated_at
+      const { data, error } = await settings.insert(insert).select('*').single()
+      if (!error) { await this.acceptVersionedRemote(item, data); return }
+      if (error.code !== '23505') throw this.cloudError(error)
+      remote = await this.findRemote(client, user.id, item)
+      if (!remote) throw this.cloudError(error)
+    }
+    // The first accepted unlock is the canonical record for this account and rule.
+    if (!remote.deleted_at && readAchievement(item.entityId, remote.value)) {
+      await this.acceptVersionedRemote(item, remote)
+      return
+    }
+    const { data, error } = await client.from(TABLES.USER_SETTING)
+      .update(this.toRemote({ ...item, baseVersion: remote.version }, user.id, remote))
+      .eq('user_id', user.id).eq('key', item.entityId).eq('version', remote.version).select('*').maybeSingle()
+    if (error) throw this.cloudError(error)
+    if (!data) throw new SyncError('远端成就记录已更新，将自动重试')
+    await this.acceptVersionedRemote(item, data)
+  }
+
   private async pushHabitItem(client: Client, user: User, item: SyncQueueRecord): Promise<void> {
     const table = TABLES[item.entityType]
     let remote = await this.findRemote(client, user.id, item)
@@ -199,7 +230,7 @@ export class SyncService {
       const insert = this.toRemote(item, user.id, null)
       delete insert.updated_at
       const { data, error } = await client.from(table).insert(insert).select('*').single()
-      if (!error) { await this.acceptHabitRemote(item, data); return }
+      if (!error) { await this.acceptVersionedRemote(item, data); return }
       if (error.code !== '23505') throw this.cloudError(error)
       remote = await this.findRemote(client, user.id, item)
       if (!remote) throw this.cloudError(error)
@@ -207,22 +238,22 @@ export class SyncService {
     const update = this.toRemote(item, user.id, remote)
     const ignored = new Set(['version', 'updated_at'])
     if (Object.entries(update).every(([key, value]) => ignored.has(key) || JSON.stringify(value) === JSON.stringify(remote![key]))) {
-      await this.acceptHabitRemote(item, remote)
+      await this.acceptVersionedRemote(item, remote)
       return
     }
     if (remote.version !== item.baseVersion || remote.id !== item.entityId || item.operation === 'INSERT') {
       const decision = this.conflicts.choose(this.localVersion(item.payload), this.remoteVersion(remote))
       await this.conflicts.record(item.entityType, item.entityId, item.payload, remote, decision.winner, decision.reason)
-      if (decision.winner === 'REMOTE') { await this.acceptHabitRemote(item, remote); return }
+      if (decision.winner === 'REMOTE') { await this.acceptVersionedRemote(item, remote); return }
     }
     const { data, error } = await client.from(table).update(this.toRemote({ ...item, baseVersion: remote.version }, user.id, remote))
       .eq('user_id', user.id).eq('id', remote.id).eq('version', remote.version).select('*').maybeSingle()
     if (error) throw this.cloudError(error)
     if (!data) throw new SyncError('习惯在同步期间再次变化，将自动重试')
-    await this.acceptHabitRemote(item, data)
+    await this.acceptVersionedRemote(item, data)
   }
 
-  private async acceptHabitRemote(item: SyncQueueRecord, row: RemoteRow): Promise<void> {
+  private async acceptVersionedRemote(item: SyncQueueRecord, row: RemoteRow): Promise<void> {
     await this.database.transaction(async () => {
       const current = await this.database.db.syncQueue.get(item.id)
       if (current && current.version !== item.version) {
@@ -333,6 +364,15 @@ export class SyncService {
   }
 
   private async mergeRemote(entityType: SyncEntityType, row: RemoteRow): Promise<void> {
+    if (entityType === 'USER_SETTING' && isAchievementKey(row.key)) {
+      if (row.deleted_at || !readAchievement(row.key, row.value)) return
+      await this.database.transaction(async () => {
+        await this.applyRemote(entityType, row)
+        const pending = await this.database.db.syncQueue.where('[entityType+entityId]').equals([entityType, row.key]).toArray()
+        for (const item of pending) await this.queue.complete(item.id)
+      })
+      return
+    }
     if (isHabitEntity(entityType)) {
       await this.database.transaction(async () => {
         const local = entityType === 'HABIT_RECORD'

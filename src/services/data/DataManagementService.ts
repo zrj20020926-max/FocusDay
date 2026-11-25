@@ -5,6 +5,8 @@ import { TASK_PRIORITIES, TASK_STATUSES } from '../../types/task'
 import { TIMER_MODES } from '../../types/timer'
 import { DatabaseService, databaseService } from '../database/DatabaseService'
 import { SyncQueueService } from '../sync/SyncQueueService'
+import { isAchievementKey, readAchievement } from '../../types/achievement'
+import { AchievementRepository } from '../database/repositories/AchievementRepository'
 
 const LEGACY_MIGRATION_ID = 'migration:local-storage:v1'
 const isObject = (value: unknown): value is Record<string, any> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -97,6 +99,7 @@ export class DataManagementService {
         && interval.endTime > interval.startTime && interval.startTime >= item.startTime && interval.endTime <= item.endTime
         && (index === 0 || interval.startTime >= intervals[index - 1]?.endTime))))
     const validSetting = (item: any) => isObject(item) && typeof item.key === 'string' && item.key.trim() && 'value' in item
+      && (!isAchievementKey(item.key) || !!readAchievement(item.key, item.value))
     const validHabit = (item: any) => isObject(item) && isUUID(item.id) && typeof item.name === 'string' && item.name.trim().length > 0 && item.name.trim().length <= 120
       && typeof item.description === 'string' && typeof item.icon === 'string' && /^#[0-9a-f]{6}$/i.test(item.color)
       && HABIT_GOAL_TYPES.includes(item.goalType) && HABIT_FREQUENCIES.includes(item.frequency) && Number.isSafeInteger(item.targetValue) && item.targetValue > 0
@@ -176,11 +179,17 @@ export class DataManagementService {
           const old = sessionMap.get(item.id); const record: FocusSessionRecord = { ...structuredClone(item), updatedAt: nowMs, deletedAt: null, syncStatus: 'PENDING', version: (old?.version ?? 0) + 1 }
           await this.database.db.focusSessions.put(record); return record
         }, nowIso)
-        await this.restoreCollection('USER_SETTING', oldSettings, backup.data.userSettings, item => item.key, async item => {
+        await this.restoreCollection('USER_SETTING', oldSettings.filter(item => !isAchievementKey(item.id)),
+          backup.data.userSettings.filter(item => !isAchievementKey(item.key)), item => item.key, async item => {
           const old = settingMap.get(item.key); const record: UserSettingsRecord = { id: item.key, value: structuredClone(item.value), createdAt: old?.createdAt ?? nowIso,
             updatedAt: nowIso, deletedAt: null, syncStatus: 'PENDING', version: (old?.version ?? 0) + 1 }
           await this.database.db.userSettings.put(record); return record
         }, nowIso)
+        const achievements = new AchievementRepository(this.database)
+        for (const setting of backup.data.userSettings) {
+          const record = readAchievement(setting.key, setting.value)
+          if (record) await achievements.unlock(record)
+        }
         await this.database.db.syncMetadata.put({ id: `import:${backup.backupId}`, lastSyncedAt: null, cursor: null,
           value: { importedAt: nowIso, exportedAt: backup.exportedAt }, createdAt: nowIso, updatedAt: nowIso,
           deletedAt: null, syncStatus: 'LOCAL', version: 1 })

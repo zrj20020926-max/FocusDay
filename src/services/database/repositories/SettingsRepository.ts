@@ -27,6 +27,20 @@ export class SettingsRepository {
     })
   }
 
+  async setOnce<T>(id: string, value: T): Promise<{ value: T; created: boolean }> {
+    return this.database.transaction(async () => {
+      const current = await this.database.db.userSettings.get(id)
+      if (current && !current.deletedAt) return { value: current.value as T, created: false }
+      const now = new Date().toISOString()
+      const record: UserSettingsRecord = { id, value: structuredClone(value), createdAt: current?.createdAt ?? now, updatedAt: now,
+        deletedAt: null, syncStatus: 'PENDING', version: (current?.version ?? 0) + 1 }
+      await this.database.db.userSettings.put(record)
+      await this.queue.enqueueWithinTransaction({ entityType: 'USER_SETTING', entityId: id, operation: current ? 'UPDATE' : 'INSERT',
+        payload: record, baseVersion: current?.version ?? 0, baseUpdatedAt: current?.updatedAt ?? null })
+      return { value, created: true }
+    })
+  }
+
   async delete(id: string): Promise<boolean> {
     await this.database.initialize()
     const current = await this.database.db.userSettings.get(id)
