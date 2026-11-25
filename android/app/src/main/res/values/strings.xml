@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Focus Day</string>
+    <string name="title_activity_main">Focus Day</string>
+    <string name="package_name">com.focusday.app</string>
+    <string name="custom_url_scheme">com.focusday.app</string>
+</resources>

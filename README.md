@@ -2,6 +2,8 @@
 
 FocusDay 项目仓库。
 
+[Android 工程、构建与认证回调配置](docs/android.md)
+
 ## 安装与离线
 
 使用 Node.js 20.19+ 运行 `npm run build`，将 `dist/` 部署到 HTTPS 站点的根路径。本地可用 `npm run preview` 验证生产版。静态托管应把应用路由回退到 `index.html`，并让 `sw.js` 重新校验缓存。Service Worker 在生产构建中启用。

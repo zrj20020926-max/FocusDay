@@ -9,7 +9,7 @@ type Mode = 'login' | 'register' | 'reset' | 'update-password'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-const mode = ref<Mode>((route.query.mode as Mode) || 'login')
+const mode = ref<Mode>(route.query.mode === 'update-password' ? 'update-password' : 'login')
 const email = ref('')
 const password = ref('')
 const displayName = ref('')
@@ -20,7 +20,7 @@ const title = computed(() => mode.value === 'register' ? '创建你的云端空�
 const subtitle = computed(() => mode.value === 'register' ? '同步能力从一个安全的账户开始。' : mode.value === 'reset' ? '我们会向你的邮箱发送安全重置链接。' : mode.value === 'update-password' ? '为账户设置一个新的安全密码。' : '登录后即可为后续多设备同步做好准备。')
 
 watch(() => route.query.mode, value => {
-  if (value === 'update-password') mode.value = value
+  mode.value = value === 'update-password' ? value : 'login'
 })
 
 async function submit() {
@@ -70,7 +70,7 @@ function switchMode(next: Mode) {
       </section>
 
       <section class="auth-card">
-        <template v-if="auth.isAuthenticated">
+        <template v-if="auth.isAuthenticated && mode !== 'update-password'">
           <span class="auth-cloud connected"><Cloud :size="25"/></span>
           <span class="eyebrow">CONNECTED</span>
           <h2>云端账户已连接</h2>

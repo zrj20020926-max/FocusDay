@@ -38,6 +38,15 @@ export const useAuthStore = defineStore('auth', {
     displayName: state => state.user?.user_metadata?.display_name as string | undefined || state.user?.email?.split('@')[0] || '本地用户',
   },
   actions: {
+    async exchangeNativeAuthCode(code: string): Promise<boolean> {
+      const result = await this.perform(async () => {
+        const { data, error } = await (await getSupabaseClient()).auth.exchangeCodeForSession(code)
+        if (error || !data.session) throw new Error('认证链接无效或已过期，请在此设备重新申请')
+        this.applySession(data.session)
+        return true
+      })
+      return result === true
+    },
     async initialize(force = false) {
       if (!this.configured || (this.initialized && !force)) { this.initialized = true; return }
       if (initialization) return initialization

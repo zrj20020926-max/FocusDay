@@ -11,10 +11,12 @@ import { toUserMessage } from '../services/errors/userMessage'
 import NotificationSettings from '../components/notification/NotificationSettings.vue'
 import ThemePicker from '../components/ThemePicker.vue'
 import PwaSettings from '../components/pwa/PwaSettings.vue'
+import { Capacitor } from '@capacitor/core'
 
 const store = useAppStore()
 const timerStore = useTimerStore()
 const authStore = useAuthStore()
+const showWebInstall = import.meta.env.MODE !== 'android' && !Capacitor.isNativePlatform()
 const { snapshot: syncSnapshot, syncNow } = useSyncStatus()
 const syncing = computed(() => syncSnapshot.value.status === 'SYNCING')
 const syncLabel = computed(() => ({ SYNCED: '已同步', SYNCING: '同步中', PENDING: '等待同步', OFFLINE: '离线', ERROR: '同步异常', CONFLICT: '存在冲突' }[syncSnapshot.value.status]))
@@ -123,7 +125,7 @@ async function deleteAccount() {
         <a class="active" href="#appearance"><Palette :size="18" />外观与布局</a>
         <a href="#focus-preferences"><Clock3 :size="18" />专注偏好</a>
         <a href="#notifications"><Bell :size="18" />通知提醒</a>
-        <a href="#offline-app"><Download :size="18" />安装与离线</a>
+        <a v-if="showWebInstall" href="#offline-app"><Download :size="18" />安装与离线</a>
       </nav>
 
       <div class="settings-content">
@@ -185,7 +187,7 @@ async function deleteAccount() {
         </section>
 
         <NotificationSettings />
-        <PwaSettings />
+        <PwaSettings v-if="showWebInstall" />
       </div>
     </div>
   </div>

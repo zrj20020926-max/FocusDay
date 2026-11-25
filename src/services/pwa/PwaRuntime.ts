@@ -1,4 +1,5 @@
 import { reactive, readonly } from 'vue'
+import { Capacitor } from '@capacitor/core'
 
 interface InstallPrompt extends Event {
   prompt(): Promise<{ outcome: 'accepted' | 'dismissed' }>
@@ -27,7 +28,8 @@ const showUpdate = () => {
 export function startPwa(beforeReload: () => Promise<void>) {
   if (cleanup) return cleanup
   const workers = navigator.serviceWorker
-  state.supported = import.meta.env.PROD && Boolean(workers) && window.isSecureContext
+  state.supported = import.meta.env.PROD && import.meta.env.MODE !== 'android'
+    && !Capacitor.isNativePlatform() && Boolean(workers) && window.isSecureContext
   state.online = navigator.onLine
   if (!state.supported) return () => undefined
   checkpoint = beforeReload

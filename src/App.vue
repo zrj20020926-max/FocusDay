@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { useTaskStore } from './stores/taskStore'
 import { subscribeToTimerCompletions, useTimerStore } from './stores/timerStore'
@@ -23,6 +23,8 @@ import { startNotifications } from './services/notification/notificationRuntime'
 import { pwa, startPwa } from './services/pwa/PwaRuntime'
 import { databaseService } from './services/database/DatabaseService'
 import { AUTH_STORAGE_KEY } from './services/supabase/client'
+import { Capacitor } from '@capacitor/core'
+import { startNativeNavigation } from './services/platform/NativeNavigation'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
@@ -35,12 +37,15 @@ const achievementStore = useAchievementStore()
 const themeStore = useThemeStore()
 themeStore.start()
 const route = useRoute()
+const router = useRouter()
 void taskStore.initialize()
 void authStore.initialize()
 let habitDateInterval: ReturnType<typeof setInterval>
 let timerInterval: number
 let stopNotifications: (() => void) | undefined
 let stopPwa: (() => void) | undefined
+let stopNative: (() => void) | undefined
+let leaving = false
 const stopSyncWatch = watch(() => authStore.isAuthenticated, authenticated => {
   if (authenticated) void syncScheduler.start().catch(() => undefined)
   else syncScheduler.stop()
@@ -61,6 +66,17 @@ function onKeydown(e: KeyboardEvent) {
     else store.commandOpen = false
   }
 }
+
+function dismissNativeOverlay(): boolean {
+  if (pwa.updating) return true
+  const dialog = document.querySelector('dialog[open]')
+  if (dialog) { dialog.dispatchEvent(new Event('cancel', { cancelable: true })); return true }
+  if (store.focusFullscreen) { store.focusFullscreen = false; return true }
+  if (store.commandOpen) { store.commandOpen = false; return true }
+  if (store.taskDrawerOpen) { store.closeTask(); return true }
+  if (focusSessionStore.completionSessionId) { focusSessionStore.dismissCompletion(); return true }
+  return false
+}
 const stopScrollWatch = watch(
   () => store.commandOpen || store.taskDrawerOpen || habitStore.drawerOpen || habitStore.formOpen || store.focusFullscreen || !!focusSessionStore.completionSessionId,
   locked => { document.body.style.overflow = locked ? 'hidden' : '' },
@@ -72,6 +88,14 @@ async function onDataSynced() {
     focusSessionStore.refreshFromPersistence().then(() => timerStore.refreshFromPersistence())])
 }
 onMounted(() => {
+  if (Capacitor.isNativePlatform()) {
+    void startNativeNavigation({
+      router, dismissOverlay: dismissNativeOverlay,
+      exchangeAuthCode: code => authStore.exchangeNativeAuthCode(code),
+      authFailed: () => store.notify('认证链接无法打开，请在此设备重新申请。'),
+    }).then(dispose => { if (leaving) dispose(); else stopNative = dispose })
+      .catch(() => store.notify('原生导航桥接暂不可用。'))
+  }
   stopPwa = startPwa(async () => {
     await nextTick()
     await Promise.all([timerStore.flushForReload(), ambientStore.flushPending()])
@@ -91,6 +115,8 @@ onMounted(() => {
   window.addEventListener('storage', onAuthStorage)
 })
 onUnmounted(() => {
+  leaving = true
+  stopNative?.()
   stopPwa?.()
   achievementStore.stop()
   themeStore.stop()

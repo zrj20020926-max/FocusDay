@@ -1,4 +1,5 @@
 import type { AuthChangeEvent, Session, User } from '@supabase/supabase-js'
+import { authRedirectUrl } from '../platform/nativeAuth'
 
 export interface AuthSubscription { unsubscribe(): void }
 
@@ -19,7 +20,7 @@ export class AuthService {
     this.validateCredentials(email, password)
     const { data, error } = await this.auth.signUp({
       email: email.trim(), password,
-      options: { data: { display_name: displayName.trim() || undefined }, emailRedirectTo: this.redirectUrl('/account') },
+      options: { data: { display_name: displayName.trim() || undefined }, emailRedirectTo: authRedirectUrl('/account') },
     })
     if (error) throw error
     return data
@@ -45,7 +46,7 @@ export class AuthService {
 
   async requestPasswordReset(email: string): Promise<void> {
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) throw new Error('请输入有效的邮箱地址')
-    const { error } = await this.auth.resetPasswordForEmail(email.trim(), { redirectTo: this.redirectUrl('/account?mode=update-password') })
+    const { error } = await this.auth.resetPasswordForEmail(email.trim(), { redirectTo: authRedirectUrl('/account?mode=update-password') })
     if (error) throw error
   }
 
@@ -65,7 +66,4 @@ export class AuthService {
     if (password.length < 8) throw new Error('密码至少需要 8 个字符')
   }
 
-  private redirectUrl(path: string): string | undefined {
-    return typeof window === 'undefined' ? undefined : `${window.location.origin}${path}`
-  }
 }

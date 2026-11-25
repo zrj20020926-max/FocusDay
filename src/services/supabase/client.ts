@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '../../types/cloud'
+import { Capacitor } from '@capacitor/core'
 
 const url = import.meta.env.VITE_SUPABASE_URL?.trim() ?? ''
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? ''
@@ -26,7 +27,8 @@ export async function getSupabaseClient(): Promise<SupabaseClient<Database>> {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true,
+        detectSessionInUrl: !Capacitor.isNativePlatform(),
+        flowType: Capacitor.isNativePlatform() ? 'pkce' : 'implicit',
         storageKey: AUTH_STORAGE_KEY,
       },
     })).catch(error => { client = null; throw error })
