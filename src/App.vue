@@ -6,6 +6,7 @@ import { useTaskStore } from './stores/taskStore'
 import { useTimerStore } from './stores/timerStore'
 import { useFocusSessionStore } from './stores/focusSessionStore'
 import { useAuthStore } from './stores/authStore'
+import { useAmbientStore } from './stores/ambientStore'
 import AppSidebar from './components/AppSidebar.vue'
 import RightPanel from './components/RightPanel.vue'
 import CommandPalette from './components/CommandPalette.vue'
@@ -19,6 +20,7 @@ const taskStore = useTaskStore()
 const timerStore = useTimerStore()
 const focusSessionStore = useFocusSessionStore()
 const authStore = useAuthStore()
+const ambientStore = useAmbientStore()
 const route = useRoute()
 void taskStore.initialize()
 void timerStore.initialize()
@@ -40,7 +42,7 @@ const stopScrollWatch = watch(
   { immediate: true }
 )
 async function onDataSynced() {
-  await Promise.all([taskStore.refresh(), focusSessionStore.refreshFromPersistence(), timerStore.refreshFromPersistence()])
+  await Promise.all([taskStore.refresh(), focusSessionStore.refreshFromPersistence(), timerStore.refreshFromPersistence(), ambientStore.refreshFromPersistence()])
 }
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)

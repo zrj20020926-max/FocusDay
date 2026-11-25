@@ -10,5 +10,6 @@ import './polish.css'
 import './detail-polish.css'
 import './auth.css'
 import './statistics.css'
+import './focus-immersive.css'
 
 createApp(App).use(createPinia()).use(router).mount('#app')

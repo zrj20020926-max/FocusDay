@@ -14,7 +14,7 @@ export const useAppStore = defineStore('app', {
     closeTask() { this.taskDrawerOpen = false; this.selectedTaskId = null },
     notify(message: string) {
       this.toast = message
-      window.setTimeout(() => { if (this.toast === message) this.toast = '' }, 2600)
+      globalThis.setTimeout(() => { if (this.toast === message) this.toast = '' }, 2600)
     }
   }
 })
