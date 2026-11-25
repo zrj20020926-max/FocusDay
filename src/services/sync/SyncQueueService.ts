@@ -42,6 +42,7 @@ export class SyncQueueService {
         ...existing,
         operation: operationAfter(existing.operation, input.operation), payload: structuredClone(input.payload),
         updatedAt: now, status: 'PENDING', retryCount: 0, nextAttemptAt: null, lastError: null,
+        version: existing.version + 1,
       }
       await this.database.db.syncQueue.put(merged)
       queueEvents.dispatchEvent(new Event('change'))
@@ -80,7 +81,7 @@ export class SyncQueueService {
   async fail(item: SyncQueueRecord, error: unknown, conflict = false): Promise<void> {
     const retryCount = item.retryCount + 1
     const delay = Math.min(5 * 60_000, 1_000 * 2 ** Math.min(retryCount - 1, 8))
-    await this.database.db.syncQueue.update(item.id, {
+    await this.database.db.syncQueue.where('id').equals(item.id).and(current => current.version === item.version).modify({
       retryCount, status: conflict ? 'CONFLICT' : 'FAILED', updatedAt: new Date().toISOString(),
       nextAttemptAt: conflict ? null : new Date(Date.now() + delay).toISOString(),
       lastError: error instanceof Error ? error.message : String(error),

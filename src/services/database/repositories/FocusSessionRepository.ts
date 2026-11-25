@@ -33,10 +33,21 @@ export class FocusSessionRepository implements FocusSessionRepositoryPort {
     return records.map(toSession).sort((a, b) => b.endTime - a.endTime)
   }
 
+  async listForHabits(): Promise<FocusSession[]> {
+    await this.database.initialize()
+    return (await this.database.db.focusSessions.where('habitId').above('').toArray())
+      .filter(record => !record.deletedAt).map(toSession)
+  }
+
   async findById(id: string): Promise<FocusSession | null> {
     await this.database.initialize()
     const record = await this.database.db.focusSessions.get(id)
     return !record || record.deletedAt ? null : toSession(record)
+  }
+
+  async hasSourceRecord(sourceRecordId: string): Promise<boolean> {
+    await this.database.initialize()
+    return Boolean(await this.database.db.focusSessions.where('sourceRecordId').equals(sourceRecordId).first())
   }
 
   async upsert(session: FocusSession): Promise<FocusSession> {
@@ -53,15 +64,25 @@ export class FocusSessionRepository implements FocusSessionRepositoryPort {
 
   async bulkUpsert(sessions: FocusSession[]): Promise<FocusSession[]> {
     if (sessions.length === 0) return []
-    await this.database.transaction(async () => {
-      const previous = await this.database.db.focusSessions.bulkGet(sessions.map(session => session.id))
-      const records = sessions.map((session, index) => toRecord(session, previous[index]))
+    return this.database.transaction(async () => {
+      const unique = new Map<string, FocusSession>()
+      for (const session of sessions) unique.set(session.sourceRecordId ?? session.id, session)
+      const candidates = [...unique.values()]
+      const sources = candidates.flatMap(session => session.sourceRecordId ? [session.sourceRecordId] : [])
+      const sourceMatches = sources.length ? await this.database.db.focusSessions.where('sourceRecordId').anyOf(sources).toArray() : []
+      const sourceIds = new Map(sourceMatches.map(record => [record.sourceRecordId, record]))
+      const accepted = candidates.filter(session => {
+        const previous = sourceIds.get(session.sourceRecordId)
+        return !previous || (previous.id === session.id && !previous.deletedAt)
+      })
+      const previous = await this.database.db.focusSessions.bulkGet(accepted.map(session => session.id))
+      const records = accepted.map((session, index) => toRecord(session, previous[index]))
       await this.database.db.focusSessions.bulkPut(records)
       await Promise.all(records.map((record, index) => this.queue.enqueueWithinTransaction({ entityType: 'FOCUS_SESSION', entityId: record.id,
         operation: previous[index] ? 'UPDATE' : 'INSERT', payload: record, baseVersion: previous[index]?.version ?? 0,
         baseUpdatedAt: previous[index] ? new Date(previous[index]!.updatedAt).toISOString() : null })))
+      return clone(accepted)
     })
-    return clone(sessions)
   }
 
   async softDelete(id: string): Promise<boolean> {

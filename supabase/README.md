@@ -23,4 +23,6 @@ For a real remote smoke test, run `scripts/verify-supabase.mjs` with `SUPABASE_U
 
 `tests/rls_verification.sql` is an integration checklist for a disposable Supabase project. Replace its two placeholder UUIDs with Auth user IDs, then execute each section in the SQL editor. The Vitest suite also checks the complete RLS policy contract and unauthenticated Repository behavior without requiring cloud credentials.
 
+Apply `202611250001_habits.sql` before releasing a client with habit sync enabled. It adds the habit tables, a unique check-in per owner, habit and date, and optional habit attribution and active intervals for focus sessions. Run `tests/habits_verification.sql` on a disposable project to check the ownership rules and unique date constraint. Focus-derived habit progress is calculated on each device from synced focus records in its local time zone.
+
 Cloud repositories are intentionally not wired into the active Pinia stores yet. IndexedDB remains the source of truth until the synchronization engine is implemented.

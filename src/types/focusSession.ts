@@ -1,10 +1,12 @@
-import type { FocusRecord, TimerMode, TimerState } from './timer'
+import type { ActiveFocusInterval, FocusRecord, TimerMode, TimerState } from './timer'
 
 export type FocusSessionStatus = 'COMPLETED' | 'CANCELLED'
 
 export interface FocusSession {
   id: string
   taskId: string | null
+  habitId?: string | null
+  activeIntervals?: ActiveFocusInterval[]
   mode: TimerMode
   startTime: number
   endTime: number
@@ -29,6 +31,7 @@ export interface FocusSessionStorage {
 export interface FocusSessionRepositoryPort {
   list(includeDeleted?: boolean): Promise<FocusSession[]>
   findById(id: string): Promise<FocusSession | null>
+  hasSourceRecord?(sourceRecordId: string): Promise<boolean>
   upsert(session: FocusSession): Promise<FocusSession>
   bulkUpsert(sessions: FocusSession[]): Promise<FocusSession[]>
   softDelete(id: string): Promise<boolean>

@@ -6,6 +6,8 @@ export interface Database {
       profiles: { Row: ProfileRow; Insert: Partial<ProfileRow> & Pick<ProfileRow, 'user_id'>; Update: Partial<ProfileRow>; Relationships: [] }
       tasks: { Row: TaskRow; Insert: Omit<TaskRow, 'created_at' | 'updated_at'> & Partial<Pick<TaskRow, 'created_at' | 'updated_at'>>; Update: Partial<TaskRow>; Relationships: [] }
       categories: { Row: CategoryRow; Insert: Omit<CategoryRow, 'created_at' | 'updated_at'> & Partial<Pick<CategoryRow, 'created_at' | 'updated_at'>>; Update: Partial<CategoryRow>; Relationships: [] }
+      habits: { Row: HabitRow; Insert: Omit<HabitRow, 'created_at' | 'updated_at'> & Partial<Pick<HabitRow, 'created_at' | 'updated_at'>>; Update: Partial<HabitRow>; Relationships: [] }
+      habit_records: { Row: HabitRecordRow; Insert: Omit<HabitRecordRow, 'created_at' | 'updated_at'> & Partial<Pick<HabitRecordRow, 'created_at' | 'updated_at'>>; Update: Partial<HabitRecordRow>; Relationships: [] }
       focus_sessions: { Row: FocusSessionRow; Insert: Omit<FocusSessionRow, 'created_at' | 'updated_at'> & Partial<Pick<FocusSessionRow, 'created_at' | 'updated_at'>>; Update: Partial<FocusSessionRow>; Relationships: [] }
       timer_states: { Row: TimerStateRow; Insert: Omit<TimerStateRow, 'created_at' | 'updated_at'> & Partial<Pick<TimerStateRow, 'created_at' | 'updated_at'>>; Update: Partial<TimerStateRow>; Relationships: [] }
       user_settings: { Row: UserSettingRow; Insert: Omit<UserSettingRow, 'created_at' | 'updated_at'> & Partial<Pick<UserSettingRow, 'created_at' | 'updated_at'>>; Update: Partial<UserSettingRow>; Relationships: [] }
@@ -56,8 +58,22 @@ export interface CategoryRow extends SyncColumns {
   is_default: boolean
 }
 
+export interface HabitRow extends SyncColumns {
+  name: string; description: string; icon: string; color: string
+  goal_type: 'DAILY_CHECKIN' | 'DAILY_DURATION' | 'WEEKLY_COUNT'
+  target_value: number; frequency: 'DAILY' | 'WEEKDAYS' | 'WEEKLY_TARGET'
+  weekdays: number[]; weekly_target: number; start_date: string; status: 'ACTIVE' | 'PAUSED'
+}
+
+export interface HabitRecordRow extends SyncColumns {
+  habit_id: string; record_date: string; actual_value: number; manual_value: number
+  focus_session_ids: string[]; completed: boolean
+}
+
 export interface FocusSessionRow extends SyncColumns {
   task_id: string | null
+  habit_id: string | null
+  active_intervals: Json
   mode: 'POMODORO' | 'STOPWATCH' | 'COUNTDOWN'
   start_time: string
   end_time: string

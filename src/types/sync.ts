@@ -1,4 +1,4 @@
-export const SYNC_ENTITY_TYPES = ['CATEGORY', 'TASK', 'FOCUS_SESSION', 'TIMER_STATE', 'USER_SETTING'] as const
+export const SYNC_ENTITY_TYPES = ['CATEGORY', 'TASK', 'HABIT', 'HABIT_RECORD', 'FOCUS_SESSION', 'TIMER_STATE', 'USER_SETTING'] as const
 export type SyncEntityType = (typeof SYNC_ENTITY_TYPES)[number]
 
 export type SyncOperation = 'INSERT' | 'UPDATE' | 'DELETE'

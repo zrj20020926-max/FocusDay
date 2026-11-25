@@ -9,17 +9,20 @@ import { FullscreenError, FullscreenService } from '../services/fullscreen/Fulls
 import { useAmbientStore } from '../stores/ambientStore'
 import { useAppStore } from '../stores/app'
 import { useTaskStore } from '../stores/taskStore'
+import { useHabitStore } from '../stores/habitStore'
 import type { TimerMode } from '../types/timer'
 
 const store = useAppStore()
 const ambient = useAmbientStore()
 const taskStore = useTaskStore()
+const habits = useHabitStore()
 const { timer, state, displayTime, progress, isRunning, phaseLabel } = useTimer()
 const focusRoot = ref<HTMLElement | null>(null)
 const fullscreenService = new FullscreenService()
 let unsubscribeFullscreen: (() => void) | null = null
 
 const focusableTasks = computed(() => taskStore.sortedTasks.filter(task => task.status !== 'COMPLETED'))
+const focusableHabits = computed(() => habits.activeHabits.filter(habit => habit.goalType === 'DAILY_DURATION' && habits.isScheduled(habit)))
 const countdownMinutes = ref(Math.round(timer.config.countdownDuration / 60000))
 const sceneStyle = computed(() => ({
   '--scene-accent': ambient.scene.accent,
@@ -83,7 +86,7 @@ onUnmounted(() => {
     <label v-if="!store.focusFullscreen && state.mode === 'COUNTDOWN' && !['RUNNING','PAUSED'].includes(state.status)" class="countdown-duration">目标时长 <input v-model.number="countdownMinutes" type="number" min="1" max="1440" @change="saveCountdown"/> 分钟</label>
 
     <ImmersiveTimer :state="state" :display-time="displayTime" :progress="progress" :is-running="isRunning" :phase-label="phaseLabel"
-      :tasks="focusableTasks" :fullscreen="store.focusFullscreen" @set-task="timer.setTask" @toggle="timer.toggle" @finish="timer.finish"
+      :tasks="focusableTasks" :habits="focusableHabits" :fullscreen="store.focusFullscreen" @set-task="timer.setTask" @set-habit="timer.setHabit" @toggle="timer.toggle" @finish="timer.finish"
       @cancel="timer.cancel" @reset="timer.reset" @enter-fullscreen="enterFullscreen"/>
 
     <section v-if="!store.focusFullscreen" class="focus-bottom immersive-focus-bottom">

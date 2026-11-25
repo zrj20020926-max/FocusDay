@@ -48,8 +48,8 @@ export class TimerService {
       this.validateConfig(snapshot.config)
       this.validateState(snapshot.state)
       this.config = clone(snapshot.config)
-      this.state = { ...clone(snapshot.state), config: clone(snapshot.config) }
-      this.records = clone(snapshot.records)
+      this.state = { ...clone(snapshot.state), habitId: snapshot.state.habitId ?? null, config: clone(snapshot.config) }
+      this.records = clone(snapshot.records).map(record => ({ ...record, habitId: record.habitId ?? null }))
       this.monotonicNow = this.state.lastObservedAt
     } else {
       const now = this.readRawNow()
@@ -74,7 +74,7 @@ export class TimerService {
       this.config.countdownDuration = options.countdownDuration
     }
     const now = this.now()
-    this.state = this.createIdleState(mode, now, options.taskId ?? this.state.taskId)
+    this.state = this.createIdleState(mode, now, options.taskId ?? this.state.taskId, options.habitId === undefined ? this.state.habitId : options.habitId)
     this.persist()
     return this.getState()
   }
@@ -91,7 +91,8 @@ export class TimerService {
     }
     const now = this.now()
     const taskId = options.taskId === undefined ? this.state.taskId : options.taskId
-    this.state = this.createIdleState(mode, now, taskId)
+    const habitId = options.habitId === undefined ? this.state.habitId : options.habitId
+    this.state = this.createIdleState(mode, now, taskId, habitId)
     this.state.sessionId = createId()
     this.state.status = 'RUNNING'
     this.state.startTime = now
@@ -175,7 +176,7 @@ export class TimerService {
     this.ensureInitialized()
     if (this.state.mode !== 'COUNTDOWN') throw new TimerDomainError('只有倒计时支持重置', 'INVALID_TRANSITION')
     const now = this.now()
-    this.state = this.createIdleState('COUNTDOWN', now, this.state.taskId)
+    this.state = this.createIdleState('COUNTDOWN', now, this.state.taskId, this.state.habitId)
     this.persist()
     return this.getState()
   }
@@ -188,6 +189,11 @@ export class TimerService {
     this.touch(now)
     this.persist()
     return this.getState()
+  }
+
+  setHabit(habitId: string | null): TimerState {
+    this.ensureInitialized(); this.assertInactive('修改关联习惯')
+    const now = this.now(); this.state.habitId = habitId; this.touch(now); this.persist(); return this.getState()
   }
 
   updateConfig(update: TimerConfigUpdate): TimerConfig {
@@ -227,9 +233,7 @@ export class TimerService {
   }
 
   private completeCurrentPhase(boundary: number): void {
-    const remaining = Math.max(0, this.state.targetDuration - this.state.phaseAccumulatedDuration)
-    this.state.phaseAccumulatedDuration += remaining
-    if (this.state.currentPhase === 'FOCUS') this.state.accumulatedDuration += remaining
+    this.bankRunningSegment(boundary)
 
     if (this.state.mode === 'COUNTDOWN') {
       this.upsertFocusRecord(boundary, true, this.state.targetDuration)
@@ -256,6 +260,7 @@ export class TimerService {
     this.state.phaseStartedAt = boundary
     this.state.segmentStartedAt = boundary
     this.state.phaseAccumulatedDuration = 0
+    this.state.activeIntervals = []
     this.state.targetDuration = this.targetFor(this.state.mode, phase)
     this.state.endTime = boundary + this.state.targetDuration
     this.state.pausedAt = null
@@ -268,7 +273,12 @@ export class TimerService {
       ? rawDelta
       : Math.min(rawDelta, Math.max(0, this.state.targetDuration - this.state.phaseAccumulatedDuration))
     this.state.phaseAccumulatedDuration += delta
-    if (this.state.currentPhase === 'FOCUS') this.state.accumulatedDuration += delta
+    if (this.state.currentPhase === 'FOCUS') {
+      this.state.accumulatedDuration += delta
+      if (delta > 0 && this.state.activeIntervals) {
+        this.state.activeIntervals.push({ startTime: this.state.segmentStartedAt, endTime: this.state.segmentStartedAt + delta })
+      }
+    }
   }
 
   private upsertFocusRecord(endedAt: number, completedNaturally: boolean, duration: number): void {
@@ -278,6 +288,8 @@ export class TimerService {
       id,
       sessionId: this.state.sessionId,
       taskId: this.state.taskId,
+      habitId: this.state.habitId,
+      activeIntervals: this.state.activeIntervals ? clone(this.state.activeIntervals) : undefined,
       mode: this.state.mode,
       round: this.state.currentRound,
       startedAt: this.state.phaseStartedAt ?? Math.max(0, endedAt - duration),
@@ -291,7 +303,7 @@ export class TimerService {
     else this.records.push(record)
   }
 
-  private createIdleState(mode: TimerMode, now: number, taskId: string | null = null): TimerState {
+  private createIdleState(mode: TimerMode, now: number, taskId: string | null = null, habitId: string | null = null): TimerState {
     const phase = 'FOCUS' as const
     return {
       version: 1,
@@ -299,6 +311,8 @@ export class TimerService {
       mode,
       status: 'IDLE',
       taskId,
+      habitId,
+      activeIntervals: [],
       startTime: null,
       endTime: null,
       targetDuration: this.targetFor(mode, phase),

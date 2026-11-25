@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarDays, CheckSquare2, Timer, ChartNoAxesCombined, Tags, Settings, Plus, Search, Sparkles } from 'lucide-vue-next'
+import { CalendarDays, CheckSquare2, Timer, ChartNoAxesCombined, Tags, Settings, Plus, Search, Sparkles, Sprout } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
 import { useTaskStore } from '../stores/taskStore'
 import { useAuthStore } from '../stores/authStore'
@@ -10,6 +10,7 @@ const nav = [
   { to: '/', label: '今日', icon: CalendarDays },
   { to: '/tasks', label: '任务', icon: CheckSquare2 },
   { to: '/focus', label: '专注', icon: Timer },
+  { to: '/habits', label: '习惯', icon: Sprout },
   { to: '/stats', label: '统计', icon: ChartNoAxesCombined },
   { to: '/settings', label: '设置', icon: Settings }
 ]

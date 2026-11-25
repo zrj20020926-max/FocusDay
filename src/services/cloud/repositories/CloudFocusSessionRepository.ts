@@ -5,7 +5,8 @@ import { cloudError, requireUser, type CloudClient } from './helpers'
 
 function fromRow(row: FocusSessionRow): FocusSession {
   return {
-    id: row.id, taskId: row.task_id, mode: row.mode, startTime: Date.parse(row.start_time), endTime: Date.parse(row.end_time),
+    id: row.id, taskId: row.task_id, habitId: row.habit_id, activeIntervals: Array.isArray(row.active_intervals) ? row.active_intervals as unknown as FocusSession['activeIntervals'] : undefined,
+    mode: row.mode, startTime: Date.parse(row.start_time), endTime: Date.parse(row.end_time),
     duration: row.duration, status: row.status, createdAt: Date.parse(row.created_at), sourceRecordId: row.source_record_id,
     completedNaturally: row.completed_naturally, completedPomodoros: row.completed_pomodoros,
   }
@@ -15,7 +16,8 @@ function toRow(session: FocusSession, userId: string): FocusSessionRow {
   assertUuid(session.id, '专注记录 ID')
   if (session.taskId) assertUuid(session.taskId, '任务 ID')
   return {
-    id: session.id, user_id: userId, task_id: session.taskId, mode: session.mode,
+    id: session.id, user_id: userId, task_id: session.taskId, habit_id: session.habitId ?? null,
+    active_intervals: session.activeIntervals?.map(({ startTime, endTime }) => ({ startTime, endTime })) ?? null, mode: session.mode,
     start_time: new Date(session.startTime).toISOString(), end_time: new Date(session.endTime).toISOString(),
     duration: session.duration, status: session.status, source_record_id: session.sourceRecordId,
     completed_naturally: session.completedNaturally, completed_pomodoros: session.completedPomodoros,

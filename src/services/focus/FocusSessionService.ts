@@ -56,10 +56,13 @@ export class FocusSessionService {
     const created: FocusSession[] = []
     for (const record of records) {
       const existing = this.sessions.find(item => item.sourceRecordId === record.id)
-      const id = existing?.id ?? crypto.randomUUID()
+      if (existing || await this.repository.hasSourceRecord?.(record.id)) continue
+      const id = crypto.randomUUID()
       const session: FocusSession = {
         id,
         taskId: record.taskId,
+        habitId: record.habitId,
+        activeIntervals: record.activeIntervals,
         mode: record.mode,
         startTime: record.startedAt,
         endTime: record.endedAt,
@@ -70,12 +73,14 @@ export class FocusSessionService {
         completedNaturally: record.completedNaturally,
         completedPomodoros: record.mode === 'POMODORO' && record.completedNaturally ? 1 : 0,
       }
-      const index = this.sessions.findIndex(item => item.id === id)
-      if (index >= 0) this.sessions[index] = session
-      else { this.sessions.push(session); created.push(session) }
+      if (!created.some(item => item.sourceRecordId === record.id)) created.push(session)
     }
-    if (created.length > 0) await this.repository.bulkUpsert(created)
-    return { created: clone(created), sessions: this.getAll() }
+    let saved: FocusSession[] = []
+    if (created.length > 0) {
+      saved = await this.repository.bulkUpsert(created)
+      this.sessions.push(...saved)
+    }
+    return { created: clone(saved), sessions: this.getAll() }
   }
 
   async recordCancellation(input: CancelledSessionInput): Promise<FocusSession> {
@@ -86,6 +91,7 @@ export class FocusSessionService {
     const session: FocusSession = {
       id,
       taskId: timerState.taskId,
+      habitId: timerState.habitId,
       mode: timerState.mode,
       startTime: timerState.phaseStartedAt ?? timerState.startTime ?? endedAt,
       endTime: endedAt,

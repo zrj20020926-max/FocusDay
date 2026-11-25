@@ -25,6 +25,8 @@ export interface TimerState {
   mode: TimerMode
   status: TimerStatus
   taskId: string | null
+  habitId?: string | null
+  activeIntervals?: ActiveFocusInterval[]
   startTime: number | null
   endTime: number | null
   targetDuration: number
@@ -42,10 +44,14 @@ export interface TimerState {
   config: TimerConfig
 }
 
+export interface ActiveFocusInterval { startTime: number; endTime: number }
+
 export interface FocusRecord {
   id: string
   sessionId: string
   taskId: string | null
+  habitId?: string | null
+  activeIntervals?: ActiveFocusInterval[]
   mode: TimerMode
   round: number
   startedAt: number
@@ -57,6 +63,7 @@ export interface FocusRecord {
 
 export interface StartTimerOptions {
   taskId?: string | null
+  habitId?: string | null
   countdownDuration?: number
 }
 

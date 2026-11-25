@@ -6,6 +6,7 @@ import { useFocusSessionStore } from '../stores/focusSessionStore'
 import { useTaskStore } from '../stores/taskStore'
 import { useTimerStore } from '../stores/timerStore'
 import { useAppStore } from '../stores/app'
+import { useHabitStore } from '../stores/habitStore'
 import { formatTimerDuration } from '../services/timer/TimerCalculator'
 
 const router = useRouter()
@@ -13,17 +14,19 @@ const sessions = useFocusSessionStore()
 const tasks = useTaskStore()
 const timer = useTimerStore()
 const app = useAppStore()
+const habits = useHabitStore()
 const session = computed(() => sessions.completionSession)
 const task = computed(() => session.value?.taskId ? tasks.getTaskById(session.value.taskId) : null)
+const habit = computed(() => habits.habits.find(item => item.id === session.value?.habitId))
 const modeName = computed(() => session.value?.mode === 'POMODORO' ? '番茄钟' : session.value?.mode === 'STOPWATCH' ? '正计时' : '倒计时')
 
 async function continueFocus() {
-  if (!session.value) return
+  const completed = session.value
+  if (!completed) return
   sessions.dismissCompletion()
   if (!['RUNNING', 'PAUSED'].includes(timer.timerState.status)) {
-    await timer.selectMode(session.value.mode)
-    await timer.setTask(session.value.taskId)
-    await timer.start(session.value.taskId)
+    await timer.selectMode(completed.mode)
+    await timer.start(completed.taskId, completed.habitId ?? null)
   }
   await router.push('/focus')
 }
@@ -47,7 +50,7 @@ function openTask() {
       <span class="focus-complete-mark"><Check :size="27"/></span>
       <span class="eyebrow">SESSION COMPLETE</span>
       <h2>完成了一段专注</h2>
-      <p>{{task?.title ?? (session.taskId ? '已删除的任务' : '自由专注')}}</p>
+      <p>{{task?.title ?? habit?.name ?? (session.taskId ? '已删除的任务' : '自由专注')}}</p>
       <div class="focus-complete-metrics"><div><Clock3 :size="17"/><span>本次时长<strong>{{formatTimerDuration(session.duration)}}</strong></span></div><div><span class="focus-mode-dot"/><span>计时模式<strong>{{modeName}}</strong></span></div></div>
       <button v-if="task" class="focus-detail-link" @click="openTask">查看关联任务与历史记录</button>
       <div class="focus-complete-actions"><button class="secondary-button" @click="backToTasks"><ListTodo :size="16"/>返回任务列表</button><button class="primary-button" @click="continueFocus"><Play :size="16" fill="currentColor"/>继续下一轮</button></div>

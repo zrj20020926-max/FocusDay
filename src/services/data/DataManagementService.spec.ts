@@ -5,6 +5,9 @@ import { IndexedDbTaskRepository } from '../database/repositories/TaskRepository
 import { DataManagementService } from './DataManagementService'
 import { DataManagementError, USER_DATA_SCHEMA_VERSION } from '../../types/dataManagement'
 import type { Task, TaskCategory } from '../../types/task'
+import { HabitRepository } from '../database/repositories/HabitRepository'
+import { HabitRecordRepository } from '../database/repositories/HabitRecordRepository'
+import { HabitService } from '../habit/HabitService'
 
 const databases: DatabaseService[] = []
 const createDatabase = async () => {
@@ -76,5 +79,30 @@ describe('DataManagementService', () => {
     expect(await database.db.tasks.count()).toBe(0)
     expect(await database.db.syncQueue.count()).toBe(0)
     expect(await database.db.syncMetadata.get('migration:local-storage:v1')).toBeTruthy()
+  })
+
+  it('备份恢复习惯与打卡，处理相同习惯日期的本地 ID，兼容旧格式', async () => {
+    const source = await seededService()
+    const habitRepository = new HabitRepository(source.database)
+    const habits = new HabitService(habitRepository, new HabitRecordRepository(source.database))
+    await habits.initialize()
+    const habit = await habits.create({ name: '散步', description: '', icon: '🌿', color: '#92aa8b',
+      goalType: 'DAILY_CHECKIN', targetValue: 1, frequency: 'DAILY', weekdays: [], weeklyTarget: 1, startDate: '2024-01-01' })
+    const record = await habits.checkIn(habit.id, '2024-01-10')
+    const backup = await source.service.createBackup('user-1')
+    const target = await createDatabase()
+    const alternateId = crypto.randomUUID()
+    await new HabitRepository(target).upsert(habit)
+    await new HabitRecordRepository(target).upsert({ ...record, id: alternateId, manualValue: 0, actualValue: 0, completed: false })
+    const service = new DataManagementService(target)
+    const { habits: _habits, habitRecords: _records, ...oldData } = backup.data
+    const legacy = service.parse(JSON.stringify({ ...backup, schemaVersion: 1, backupId: crypto.randomUUID(), data: oldData }))
+    await service.restore(legacy, 'user-1')
+    expect(await target.db.habits.count()).toBe(1)
+    expect(await service.restore(backup, 'user-1')).toMatchObject({ habits: 1, habitRecords: 1 })
+    expect(await target.db.habitRecords.toArray()).toMatchObject([{ id: alternateId, completed: true }])
+    await service.clearLocalData()
+    expect(await target.db.habits.count()).toBe(0)
+    expect(await target.db.habitRecords.count()).toBe(0)
   })
 })

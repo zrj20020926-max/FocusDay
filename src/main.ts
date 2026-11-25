@@ -11,5 +11,6 @@ import './detail-polish.css'
 import './auth.css'
 import './statistics.css'
 import './focus-immersive.css'
+import './habits.css'
 
 createApp(App).use(createPinia()).use(router).mount('#app')

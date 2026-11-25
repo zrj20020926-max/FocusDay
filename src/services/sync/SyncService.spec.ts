@@ -1,11 +1,14 @@
 import 'fake-indexeddb/auto'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseService } from '../database/DatabaseService'
 import { IndexedDbTaskRepository } from '../database/repositories/TaskRepository'
 import { SyncQueueService } from './SyncQueueService'
 import { SyncService } from './SyncService'
 import { SyncStatusService } from './SyncStatusService'
 import type { Task, TaskCategory } from '../../types/task'
+import { HabitService } from '../habit/HabitService'
+import { HabitRepository } from '../database/repositories/HabitRepository'
+import { HabitRecordRepository } from '../database/repositories/HabitRecordRepository'
 
 type Row = Record<string, any>
 
@@ -15,7 +18,7 @@ class MemoryQuery implements PromiseLike<{ data: any; error: any }> {
   private filters: Array<(row: Row) => boolean> = []
   private orders: Array<{ key: string; ascending: boolean }> = []
   private rangeValue: [number, number] | null = null
-  constructor(private rows: Row[]) {}
+  constructor(private rows: Row[], private table: string) {}
   select(): this { return this }
   insert(value: Row | Row[]): this { this.mode = 'insert'; this.values = Array.isArray(value) ? value : [value]; return this }
   update(value: Row): this { this.mode = 'update'; this.values = [value]; return this }
@@ -31,13 +34,15 @@ class MemoryQuery implements PromiseLike<{ data: any; error: any }> {
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null): PromiseLike<TResult1 | TResult2> {
     return this.execute().then(onfulfilled, onrejected)
   }
-  private async execute(): Promise<{ data: Row[]; error: null }> {
+  private async execute(): Promise<{ data: Row[]; error: { code: string; message: string } | null }> {
     if (this.mode === 'insert') {
       const now = new Date().toISOString()
       const inserted: Row[] = this.values.map(value => ({ created_at: now, updated_at: now, ...structuredClone(value) }))
       for (const value of inserted) {
-        const existing = this.rows.find(row => row.id === value.id)
-        if (!existing) this.rows.push(value)
+        const existing = this.rows.find(row => row.id === value.id || (this.table === 'habit_records' && row.user_id === value.user_id
+          && row.habit_id === value.habit_id && row.record_date === value.record_date))
+        if (existing) return { data: [], error: { code: '23505', message: 'duplicate key' } }
+        this.rows.push(value)
       }
       return { data: inserted, error: null }
     }
@@ -53,13 +58,13 @@ class MemoryQuery implements PromiseLike<{ data: any; error: any }> {
 }
 
 class MemorySupabase {
-  readonly tables: Record<string, Row[]> = { categories: [], tasks: [], focus_sessions: [], timer_states: [], user_settings: [] }
+  readonly tables: Record<string, Row[]> = { categories: [], tasks: [], habits: [], habit_records: [], focus_sessions: [], timer_states: [], user_settings: [] }
   readonly auth = { getUser: async () => ({ data: { user: { id: '00000000-0000-4000-8000-000000000001' } }, error: null }) }
-  from(table: string) { return new MemoryQuery(this.tables[table]) }
+  from(table: string) { return new MemoryQuery(this.tables[table], table) }
 }
 
 const databases: DatabaseService[] = []
-afterEach(async () => { await Promise.all(databases.splice(0).map(db => db.delete())) })
+afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(databases.splice(0).map(db => db.delete())) })
 
 async function setup() {
   const db = new DatabaseService(`sync-service-${crypto.randomUUID()}`); databases.push(db); await db.initialize()
@@ -156,5 +161,63 @@ describe('SyncService', () => {
     expect(results.every(result => result.status === 'rejected')).toBe(true)
     expect(calls).toBe(1)
     expect(status.getSnapshot()).toMatchObject({ status: 'ERROR', lastError: expect.stringContaining('超时') })
+  })
+
+  it('两台设备离线对同一习惯同一天打卡，重连后只保留一个云端和本地记录', async () => {
+    const first = await setup()
+    const second = await setup()
+    const syncSecond = new SyncService(second.db, second.queue, second.status, async () => first.cloud as any)
+    const makeService = (db: DatabaseService) => new HabitService(new HabitRepository(db), new HabitRecordRepository(db))
+    const habitA = makeService(first.db)
+    const habitB = makeService(second.db)
+    await habitA.initialize()
+    const habit = await habitA.create({ name: '阅读', description: '', icon: '📚', color: '#92aa8b',
+      goalType: 'DAILY_CHECKIN', targetValue: 1, frequency: 'DAILY', weekdays: [], weeklyTarget: 1, startDate: '2026-01-01' })
+    await first.sync.syncNow()
+    await syncSecond.syncNow()
+    await habitB.initialize()
+    const day = '2026-01-02'
+    const recordA = await habitA.checkIn(habit.id, day)
+    const recordB = await habitB.checkIn(habit.id, day)
+    expect(recordA.id).not.toBe(recordB.id)
+    vi.stubGlobal('navigator', { onLine: false })
+    await first.sync.syncNow()
+    expect(first.cloud.tables.habit_records).toHaveLength(0)
+    expect(await first.queue.countPending()).toBe(1)
+    vi.stubGlobal('navigator', { onLine: true })
+    await Promise.all([first.sync.syncNow(), syncSecond.syncNow()])
+    await syncSecond.syncNow()
+    expect(first.cloud.tables.habit_records).toHaveLength(1)
+    expect(await first.db.db.habitRecords.count()).toBe(1)
+    expect(await second.db.db.habitRecords.get(first.cloud.tables.habit_records[0].id)).toBeDefined()
+    expect(await second.queue.countPending()).toBe(0)
+
+    await habitB.uncheck(habit.id, day)
+    await syncSecond.syncNow()
+    await first.sync.syncNow()
+    await habitA.reload()
+    expect(habitA.getRecords(habit.id)).toHaveLength(0)
+    expect(first.cloud.tables.habit_records[0].manual_value).toBe(0)
+    await habitB.delete(habit.id)
+    await syncSecond.syncNow()
+    await first.sync.syncNow()
+    expect(await new HabitRepository(first.db).findById(habit.id)).toBeNull()
+    expect(first.cloud.tables.habits[0].deleted_at).toBeTruthy()
+  })
+
+  it('记录多端不同打卡数值的版本冲突，保留一个日期记录', async () => {
+    const { db, cloud, sync, queue } = await setup()
+    const habits = new HabitService(new HabitRepository(db), new HabitRecordRepository(db))
+    await habits.initialize()
+    const habit = await habits.create({ name: '阅读', description: '', icon: '📚', color: '#92aa8b',
+      goalType: 'DAILY_DURATION', targetValue: 60_000, frequency: 'DAILY', weekdays: [], weeklyTarget: 1, startDate: '2026-01-01' })
+    const record = await habits.checkIn(habit.id, '2026-01-02', 60_000)
+    await sync.syncNow()
+    await habits.checkIn(habit.id, '2026-01-02', 120_000)
+    Object.assign(cloud.tables.habit_records[0], { updated_at: new Date(Date.now() + 1_000).toISOString(), actual_value: 180_000, manual_value: 180_000, version: 2 })
+    await sync.syncNow()
+    expect(await db.db.habitRecords.get(record.id)).toMatchObject({ manualValue: 180_000, syncStatus: 'SYNCED' })
+    expect(await db.db.syncConflicts.toArray()).toMatchObject([{ entityType: 'HABIT_RECORD', winner: 'REMOTE' }])
+    expect(await queue.countPending()).toBe(0)
   })
 })

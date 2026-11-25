@@ -1,6 +1,7 @@
 import type { FocusSession } from './focusSession'
 import type { Task, TaskCategory } from './task'
 import type { TimerSnapshot } from './timer'
+import type { Habit, HabitRecord } from './habit'
 import type { SyncConflict, SyncEntityType, SyncOperation, SyncQueueStatus } from './sync'
 
 export const SYNC_STATUSES = ['LOCAL', 'PENDING', 'SYNCED', 'CONFLICT'] as const
@@ -16,6 +17,8 @@ export interface PersistenceMetadata {
 
 export type TaskRecord = Task & Pick<PersistenceMetadata, 'deletedAt' | 'syncStatus' | 'version'>
 export type CategoryRecord = TaskCategory & Pick<PersistenceMetadata, 'deletedAt' | 'syncStatus' | 'version'>
+export type HabitEntityRecord = Habit & Pick<PersistenceMetadata, 'syncStatus' | 'version'>
+export type HabitRecordEntity = HabitRecord & Pick<PersistenceMetadata, 'syncStatus' | 'version'>
 
 export interface FocusSessionRecord extends Omit<FocusSession, 'createdAt'> {
   createdAt: number
@@ -73,6 +76,8 @@ export interface DatabaseExport {
     syncQueue: SyncQueueRecord[]
     syncMetadata: SyncMetadataRecord[]
     syncConflicts: SyncConflictRecord[]
+    habits: HabitEntityRecord[]
+    habitRecords: HabitRecordEntity[]
   }
 }
 

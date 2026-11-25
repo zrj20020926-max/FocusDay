@@ -76,7 +76,8 @@ async function importData(event: Event) {
   try {
     const backup = dataManagementService.parse(await file.text())
     const counts = backup.data
-    const confirmed = window.confirm(`将使用此备份恢复 ${counts.tasks.length} 个任务、${counts.focusSessions.length} 条专注记录。现有数据会被替换，是否继续？`)
+    const habits = backup.schemaVersion >= 2 ? `、${counts.habits.length} 个习惯和 ${counts.habitRecords.length} 条打卡记录` : ''
+    const confirmed = window.confirm(`将使用此备份恢复 ${counts.tasks.length} 个任务、${counts.focusSessions.length} 条专注记录${habits}。备份包含的数据类型会替换当前数据，是否继续？`)
     if (!confirmed) return
     await dataManagementService.restore(backup, authStore.user?.id ?? null)
     store.notify('数据恢复完成，待同步到其他设备')

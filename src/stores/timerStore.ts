@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { toRaw } from 'vue'
 import { TimerRepository } from '../services/database/repositories/TimerRepository'
 import { SettingsRepository } from '../services/database/repositories/SettingsRepository'
 import { TimerCalculator, formatTimerDuration } from '../services/timer/TimerCalculator'
@@ -6,6 +7,7 @@ import { TimerService, type TimerConfigUpdate } from '../services/timer/TimerSer
 import { DEFAULT_TIMER_CONFIG, TimerDomainError, type FocusRecord, type TimerConfig, type TimerMode, type TimerState } from '../types/timer'
 import { useAppStore } from './app'
 import { useFocusSessionStore } from './focusSessionStore'
+import { useHabitStore } from './habitStore'
 
 const timerRepository = new TimerRepository()
 const settingsRepository = new SettingsRepository()
@@ -21,6 +23,7 @@ function initialState(): TimerState {
     mode: 'POMODORO',
     status: 'IDLE',
     taskId: null,
+    habitId: null,
     startTime: null,
     endTime: null,
     targetDuration: DEFAULT_TIMER_CONFIG.pomodoro.focusDuration,
@@ -117,9 +120,14 @@ export const useTimerStore = defineStore('timer', {
     async selectMode(mode: TimerMode) {
       return this.run(() => service.prepare(mode))
     },
-    async start(taskId?: string | null) {
+    async start(taskId?: string | null, habitId?: string | null) {
       const linkedTaskId = taskId === undefined ? this.timerState.taskId : taskId
-      const state = await this.run(() => service.start(this.timerState.mode, { taskId: linkedTaskId }))
+      const habits = useHabitStore()
+      const preferredHabitId = habitId === undefined && taskId === undefined ? this.timerState.habitId : habitId
+      if (preferredHabitId) await habits.initialize().catch(() => undefined)
+      habits.updateDate()
+      const linkedHabit = habits.activeHabits.find(habit => habit.id === preferredHabitId && habit.goalType === 'DAILY_DURATION' && habits.isScheduled(habit))
+      const state = await this.run(() => service.start(this.timerState.mode, { taskId: linkedTaskId, habitId: linkedHabit?.id ?? null }))
       if (state) useAppStore().notify('专注计时已开始')
       return state
     },
@@ -136,7 +144,7 @@ export const useTimerStore = defineStore('timer', {
       return state
     },
     async cancel() {
-      const before = structuredClone(this.timerState)
+      const before = structuredClone(toRaw(this.timerState))
       const cancelAt = Math.max(this.nowMs, Date.now(), before.lastObservedAt)
       const cancelledDuration = before.currentPhase === 'FOCUS' ? TimerCalculator.phaseElapsed(before, cancelAt) : 0
       const state = await this.run(() => service.cancel())
@@ -148,6 +156,7 @@ export const useTimerStore = defineStore('timer', {
     },
     async reset() { return this.run(() => service.reset()) },
     async setTask(taskId: string | null) { return this.run(() => service.setTask(taskId)) },
+    async setHabit(habitId: string | null) { return this.run(() => service.setHabit(habitId)) },
     async updateConfig(update: TimerConfigUpdate) {
       try {
         if (!this.initialized) await this.initialize()

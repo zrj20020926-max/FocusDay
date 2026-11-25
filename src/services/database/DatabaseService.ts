@@ -9,11 +9,13 @@ import type {
   TaskRecord,
   TimerStateRecord,
   UserSettingsRecord,
+  HabitEntityRecord,
+  HabitRecordEntity,
 } from '../../types/database'
 import { migrateLocalStorage } from './migrations/localStorageMigration'
 
 export const DATABASE_NAME = 'focus-day'
-export const DATABASE_VERSION = 5
+export const DATABASE_VERSION = 6
 
 export class FocusDayDatabase extends Dexie {
   tasks!: EntityTable<TaskRecord, 'id'>
@@ -24,6 +26,8 @@ export class FocusDayDatabase extends Dexie {
   syncQueue!: EntityTable<SyncQueueRecord, 'id'>
   syncMetadata!: EntityTable<SyncMetadataRecord, 'id'>
   syncConflicts!: EntityTable<SyncConflictRecord, 'id'>
+  habits!: EntityTable<HabitEntityRecord, 'id'>
+  habitRecords!: EntityTable<HabitRecordEntity, 'id'>
 
   constructor(name = DATABASE_NAME) {
     super(name)
@@ -75,15 +79,20 @@ export class FocusDayDatabase extends Dexie {
         record.updatedAt ??= now
       })
     })
+    this.version(5).stores({
+      focusSessions: 'id, taskId, status, mode, startTime, endTime, sourceRecordId, createdAt, deletedAt, syncStatus, [taskId+endTime]',
+    })
     this.version(DATABASE_VERSION).stores({
       tasks: 'id, status, categoryId, plannedDate, dueDate, completedAt, sortOrder, updatedAt, deletedAt, syncStatus, [status+sortOrder]',
       categories: 'id, name, updatedAt, deletedAt, syncStatus',
-      focusSessions: 'id, taskId, status, mode, startTime, endTime, sourceRecordId, createdAt, deletedAt, syncStatus, [taskId+endTime]',
+      focusSessions: 'id, taskId, habitId, status, mode, startTime, endTime, sourceRecordId, createdAt, deletedAt, syncStatus, [taskId+endTime]',
       timerStates: 'id, updatedAt, deletedAt, syncStatus',
       userSettings: 'id, updatedAt, deletedAt, syncStatus',
       syncQueue: 'id, entityType, entityId, operation, status, createdAt, updatedAt, deletedAt, syncStatus, nextAttemptAt, [entityType+entityId]',
       syncMetadata: 'id, updatedAt, deletedAt, syncStatus',
       syncConflicts: 'id, entityType, entityId, winner, reason, createdAt, deletedAt, [entityType+entityId]',
+      habits: 'id, status, goalType, frequency, startDate, updatedAt, deletedAt, syncStatus',
+      habitRecords: 'id, habitId, recordDate, updatedAt, deletedAt, syncStatus, &[habitId+recordDate]',
     })
   }
 
@@ -130,13 +139,13 @@ export class DatabaseService {
   async transaction<T>(callback: () => Promise<T>): Promise<T> {
     await this.initialize()
     return this.db.transaction('rw', [this.db.tasks, this.db.categories, this.db.focusSessions, this.db.timerStates,
-      this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts], callback)
+      this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts, this.db.habits, this.db.habitRecords], callback)
   }
 
   async exportData(): Promise<DatabaseExport> {
     await this.initialize()
     return this.db.transaction('r', [this.db.tasks, this.db.categories, this.db.focusSessions, this.db.timerStates,
-      this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts], async () => ({
+      this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts, this.db.habits, this.db.habitRecords], async () => ({
         format: 'focus-day-database',
         schemaVersion: DATABASE_VERSION,
         exportedAt: new Date().toISOString(),
@@ -149,6 +158,8 @@ export class DatabaseService {
           syncQueue: await this.db.syncQueue.toArray(),
           syncMetadata: await this.db.syncMetadata.toArray(),
           syncConflicts: await this.db.syncConflicts.toArray(),
+          habits: await this.db.habits.toArray(),
+          habitRecords: await this.db.habitRecords.toArray(),
         },
       }))
   }
@@ -157,7 +168,7 @@ export class DatabaseService {
     if (backup.format !== 'focus-day-database' || !backup.data) throw new Error('备份文件格式无效')
     await this.transaction(async () => {
       const tables = [this.db.tasks, this.db.categories, this.db.focusSessions, this.db.timerStates,
-        this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts]
+        this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts, this.db.habits, this.db.habitRecords]
       await Promise.all(tables.map(table => table.clear()))
       await this.db.tasks.bulkPut(backup.data.tasks ?? [])
       await this.db.categories.bulkPut(backup.data.categories ?? [])
@@ -167,6 +178,8 @@ export class DatabaseService {
       await this.db.syncQueue.bulkPut(backup.data.syncQueue ?? [])
       await this.db.syncMetadata.bulkPut(backup.data.syncMetadata ?? [])
       await this.db.syncConflicts.bulkPut(backup.data.syncConflicts ?? [])
+      await this.db.habits.bulkPut(backup.data.habits ?? [])
+      await this.db.habitRecords.bulkPut(backup.data.habitRecords ?? [])
     })
   }
 
