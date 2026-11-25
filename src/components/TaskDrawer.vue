@@ -7,6 +7,7 @@ import { localDateKey, type TaskPriority, type TaskStatus } from '../types/task'
 import { useFocusSessionStore } from '../stores/focusSessionStore'
 import { formatTimerDuration } from '../services/timer/TimerCalculator'
 import { useTaskFocus } from '../composables/useTaskFocus'
+import ReminderEditor from './notification/ReminderEditor.vue'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
@@ -109,6 +110,7 @@ function tomorrow(): string {
           <div><span><Clock3 :size="16" />专注次数</span><strong>{{ focusSummary.focusCount }} 次</strong></div>
         </div>
         <div v-if="!editing" class="notes"><span><AlignLeft :size="16" />备注</span><p>{{ task.description || '还没有添加任务描述。' }}</p></div>
+        <ReminderEditor v-if="!editing" target="task" :target-id="task.id" :due-date="task.dueDate" />
         <div v-if="!editing" class="focus-history"><div class="section-heading"><h3>历史专注记录</h3><span>{{focusSummary.focusCount}} 次</span></div><div v-if="focusHistory.length"><div v-for="session in focusHistory" :key="session.id"><span>{{new Date(session.endTime).toLocaleDateString('zh-CN')}} · {{session.mode==='POMODORO'?'番茄钟':session.mode==='STOPWATCH'?'正计时':'倒计时'}}{{session.status==='CANCELLED'?' · 已取消':''}}</span><strong>{{formatTimerDuration(session.duration)}}</strong></div></div><p v-else>还没有专注记录，从一次安静的专注开始吧。</p></div>
       </div>
       <footer>

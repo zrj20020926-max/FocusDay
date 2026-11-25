@@ -7,6 +7,14 @@ export type TimerStatus = (typeof TIMER_STATUSES)[number]
 export const TIMER_PHASES = ['FOCUS', 'SHORT_BREAK', 'LONG_BREAK'] as const
 export type TimerPhase = (typeof TIMER_PHASES)[number]
 
+export interface TimerPhaseCompletion {
+  sessionId: string
+  phaseSequence: number
+  mode: 'POMODORO' | 'COUNTDOWN'
+  phase: TimerPhase
+  completedAt: number
+}
+
 export interface PomodoroConfig {
   focusDuration: number
   shortBreakDuration: number

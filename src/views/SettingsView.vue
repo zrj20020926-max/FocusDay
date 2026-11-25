@@ -8,6 +8,7 @@ import { useSyncStatus } from '../composables/useSyncStatus'
 import { dataManagementService } from '../services/data/DataManagementService'
 import { DataManagementError } from '../types/dataManagement'
 import { toUserMessage } from '../services/errors/userMessage'
+import NotificationSettings from '../components/notification/NotificationSettings.vue'
 
 const store = useAppStore()
 const timerStore = useTimerStore()
@@ -23,7 +24,6 @@ const dataBusy = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const deleteConfirmOpen = ref(false)
 const deleteConfirmation = ref('')
-const notifications = ref(true)
 const focusSound = ref(true)
 const focusMinutes = ref(timerStore.config.pomodoro.focusDuration / 60000)
 const shortBreakMinutes = ref(timerStore.config.pomodoro.shortBreakDuration / 60000)
@@ -38,9 +38,8 @@ watch(() => timerStore.initialized, initialized => {
   longBreakEvery.value = timerStore.config.pomodoro.longBreakEvery
 }, { immediate: true })
 
-function toggle(model: 'notifications' | 'focusSound') {
-  if (model === 'notifications') notifications.value = !notifications.value
-  if (model === 'focusSound') focusSound.value = !focusSound.value
+function toggleFocusSound() {
+  focusSound.value = !focusSound.value
   store.notify('设置已更新')
 }
 function saveTimerConfig() {
@@ -180,14 +179,11 @@ async function deleteAccount() {
         <section id="focus-preferences" class="setting-section">
           <div class="setting-heading"><h2>专注偏好</h2><p>设置计时过程中的默认体验。</p></div>
           <div class="setting-row timer-config-row"><span class="setting-icon"><Clock3 :size="18" /></span><div><strong>番茄钟节奏</strong><small>修改会应用到下一次计时，进行中的会话不会被打断</small><div class="timer-config-inputs"><label>专注<input v-model.number="focusMinutes" type="number" min="1" @change="saveTimerConfig"/>分</label><label>短休息<input v-model.number="shortBreakMinutes" type="number" min="1" @change="saveTimerConfig"/>分</label><label>长休息<input v-model.number="longBreakMinutes" type="number" min="1" @change="saveTimerConfig"/>分</label><label>每<input v-model.number="longBreakEvery" type="number" min="1" @change="saveTimerConfig"/>轮长休</label></div></div></div>
-          <div class="setting-row"><span class="setting-icon"><Volume2 :size="18" /></span><div><strong>专注环境声</strong><small>开始专注时播放轻柔的背景声音</small></div><button class="switch" :class="{ on: focusSound }" role="switch" :aria-checked="focusSound" @click="toggle('focusSound')"><span /></button></div>
+          <div class="setting-row"><span class="setting-icon"><Volume2 :size="18" /></span><div><strong>专注环境声</strong><small>开始专注时播放轻柔的背景声音</small></div><button class="switch" :class="{ on: focusSound }" role="switch" :aria-checked="focusSound" @click="toggleFocusSound"><span /></button></div>
           <div class="setting-row"><span class="setting-icon"><Sun :size="18" /></span><div><strong>自动衔接阶段</strong><small>每轮专注结束后自动休息，休息结束进入下一轮</small></div><button class="switch on" role="switch" aria-checked="true" disabled><span /></button></div>
         </section>
 
-        <section id="notifications" class="setting-section">
-          <div class="setting-heading"><h2>通知提醒</h2><p>仅在真正需要时打扰你。</p></div>
-          <div class="setting-row"><span class="setting-icon"><Bell :size="18" /></span><div><strong>任务与计时提醒</strong><small>接收截止时间和专注结束通知</small></div><button class="switch" :class="{ on: notifications }" role="switch" :aria-checked="notifications" @click="toggle('notifications')"><span /></button></div>
-        </section>
+        <NotificationSettings />
       </div>
     </div>
   </div>

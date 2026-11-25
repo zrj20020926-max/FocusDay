@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { X, Pause, Play, Trash2, Check, Pencil } from 'lucide-vue-next'
 import type { Habit, HabitRecord, HabitStats } from '../../types/habit'
 import { isWeeklyHabit, formatHabitValue } from '../../services/habit/HabitService'
+import ReminderEditor from '../notification/ReminderEditor.vue'
 
 const props = defineProps<{ habit: Habit; records: HabitRecord[]; stats: HabitStats; busy: boolean; today: string }>()
 const emit = defineEmits<{ close: []; edit: []; status: []; remove: [] }>()
@@ -36,6 +37,7 @@ onMounted(() => dialog.value?.showModal())
           <button class="secondary-button" :disabled="busy" @click="emit('status')"><component :is="habit.status==='ACTIVE'?Pause:Play" :size="16"/>{{ habit.status==='ACTIVE' ? '暂停' : '恢复' }}</button>
           <button class="habit-delete" :class="{ confirming }" :disabled="busy" @click="confirming ? emit('remove') : confirming = true"><Trash2 :size="16"/>{{ confirming ? '确认删除' : '删除习惯' }}</button>
         </footer>
+        <ReminderEditor target="habit" :target-id="habit.id" />
         <section class="habit-history">
           <div class="section-heading"><h3>打卡历史</h3><small>{{ records.length }} 天</small></div>
           <div v-if="!records.length" class="habit-empty compact">还没有记录。</div>

@@ -11,6 +11,7 @@ import {
   type StartTimerOptions,
   type TimerConfig,
   type TimerMode,
+  type TimerPhaseCompletion,
   type TimerSnapshot,
   type TimerState,
   type TimerStorage,
@@ -35,6 +36,7 @@ export class TimerService {
   private config: TimerConfig = clone(DEFAULT_TIMER_CONFIG)
   private initialized = false
   private monotonicNow = 0
+  private completedPhases: TimerPhaseCompletion[] = []
 
   constructor(
     private readonly storage: TimerStorage,
@@ -64,6 +66,7 @@ export class TimerService {
   getState(): TimerState { this.ensureInitialized(); return clone(this.state) }
   getRecords(): FocusRecord[] { this.ensureInitialized(); return clone(this.records) }
   getConfig(): TimerConfig { this.ensureInitialized(); return clone(this.config) }
+  takeCompletedPhases(): TimerPhaseCompletion[] { return this.completedPhases.splice(0) }
 
   prepare(mode: TimerMode, options: StartTimerOptions = {}): TimerState {
     this.ensureInitialized()
@@ -220,14 +223,18 @@ export class TimerService {
     if (!this.initialized || this.state.status !== 'RUNNING' || this.state.mode === 'STOPWATCH') return clone(this.state)
     const now = this.now()
     let transitions = 0
+    const completions: TimerPhaseCompletion[] = []
     while (this.state.status === 'RUNNING' && TimerCalculator.remaining(this.state, now) === 0) {
       if (++transitions > 10000) throw new TimerDomainError('检测到异常的系统时间跨度，请重新开始计时', 'INVALID_STATE')
       const boundary = this.state.endTime ?? now
+      const { sessionId, phaseSequence, currentPhase, mode } = this.state
       this.completeCurrentPhase(boundary)
+      completions.push({ sessionId, phaseSequence, phase: currentPhase, mode, completedAt: boundary })
     }
     if (transitions > 0) {
       this.touch(now)
       this.persist()
+      this.completedPhases.push(...completions)
     }
     return clone(this.state)
   }

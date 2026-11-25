@@ -1,4 +1,4 @@
-import { computed, onMounted, onScopeDispose } from 'vue'
+import { computed } from 'vue'
 import { useTimerStore } from '../stores/timerStore'
 
 const modeLabels = { POMODORO: '番茄钟', STOPWATCH: '正计时', COUNTDOWN: '倒计时' } as const
@@ -6,19 +6,6 @@ const phaseLabels = { FOCUS: '专注', SHORT_BREAK: '短休息', LONG_BREAK: '�
 
 export function useTimer() {
   const timer = useTimerStore()
-  void timer.initialize()
-  let interval: number | undefined
-  const refresh = () => { void timer.tick() }
-
-  onMounted(() => {
-    refresh()
-    interval = window.setInterval(refresh, 250)
-    document.addEventListener('visibilitychange', refresh)
-  })
-  onScopeDispose(() => {
-    if (interval !== undefined) window.clearInterval(interval)
-    document.removeEventListener('visibilitychange', refresh)
-  })
 
   return {
     timer,

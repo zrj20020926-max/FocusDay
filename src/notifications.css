@@ -1,0 +1,22 @@
+.reminder-editor {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f5f3ed;
+}
+.reminder-editor > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0; border: 0; background: transparent; }
+.reminder-editor header > div { display: flex; align-items: center; gap: 8px; color: #52694e; font-size: 13px; }
+.reminder-editor p, .reminder-editor label, .reminder-editor small { color: #61695f; font-size: 12px; margin: 0; }
+.reminder-editor form { display: grid; gap: 10px; }
+.reminder-editor label { display: grid; gap: 5px; min-width: 0; }
+.reminder-editor select, .reminder-editor input {
+  width: 100%; min-width: 0; min-height: 40px; padding: 7px 9px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--card); color: var(--text); font: inherit;
+}
+.reminder-editor :focus-visible { outline: 2px solid var(--green-dark); outline-offset: 2px; }
+.reminder-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.notification-system-row .secondary-button { flex: none; }
+.reminder-error, .reminder-editor .reminder-error { color: #914d3f; font-size: 12px; }

@@ -2,6 +2,7 @@ import type { SupabaseClient, User } from '@supabase/supabase-js'
 import type { CategoryRecord, FocusSessionRecord, HabitEntityRecord, HabitRecordEntity, SyncQueueRecord, TaskRecord, TimerStateRecord, UserSettingsRecord } from '../../types/database'
 import type { Json } from '../../types/cloud'
 import type { SyncEntityType } from '../../types/sync'
+import { reminderKey } from '../../types/notification'
 import { DatabaseService, databaseService } from '../database/DatabaseService'
 import { getSupabaseClient } from '../supabase/client'
 import { SyncConflictResolver, type VersionedValue } from './SyncConflictResolver'
@@ -114,6 +115,16 @@ export class SyncService {
         await this.database.db.focusSessions.bulkPut(sessions.map(item => ({ ...item, id: sessionIds.get(item.id) ?? item.id,
           taskId: item.taskId ? taskIds.get(item.taskId) ?? item.taskId : null,
           habitId: item.habitId ? habitIds.get(item.habitId) ?? item.habitId : null })))
+      }
+      for (const [target, ids] of [['task', taskIds], ['habit', habitIds]] as const) {
+        for (const [oldId, newId] of ids) {
+          const previousKey = reminderKey(target, oldId)
+          const setting = await this.database.db.userSettings.get(previousKey)
+          if (setting) {
+            await this.database.db.userSettings.put({ ...setting, id: reminderKey(target, newId) })
+            await this.database.db.userSettings.delete(previousKey)
+          }
+        }
       }
       const timer = await this.database.db.timerStates.get('active')
       if (timer && (taskIds.size || habitIds.size)) {

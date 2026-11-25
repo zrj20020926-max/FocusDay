@@ -3,7 +3,7 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { useTaskStore } from './stores/taskStore'
-import { useTimerStore } from './stores/timerStore'
+import { subscribeToTimerCompletions, useTimerStore } from './stores/timerStore'
 import { useFocusSessionStore } from './stores/focusSessionStore'
 import { useAuthStore } from './stores/authStore'
 import { useAmbientStore } from './stores/ambientStore'
@@ -15,6 +15,7 @@ import TaskDrawer from './components/TaskDrawer.vue'
 import FocusCompletionDialog from './components/FocusCompletionDialog.vue'
 import { PanelRightOpen } from 'lucide-vue-next'
 import { syncScheduler } from './services/sync/SyncScheduler'
+import { startNotifications } from './services/notification/notificationRuntime'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
@@ -25,9 +26,10 @@ const ambientStore = useAmbientStore()
 const habitStore = useHabitStore()
 const route = useRoute()
 void taskStore.initialize()
-void timerStore.initialize()
 void authStore.initialize()
 let habitDateInterval: ReturnType<typeof setInterval>
+let timerInterval: number
+let stopNotifications: (() => void) | undefined
 
 function onKeydown(e: KeyboardEvent) {
   if (e.repeat) return
@@ -46,10 +48,15 @@ const stopScrollWatch = watch(
   { immediate: true }
 )
 async function onDataSynced() {
-  await Promise.all([taskStore.refresh(), timerStore.refreshFromPersistence(), ambientStore.refreshFromPersistence(),
-    habitStore.refresh().catch(() => store.notify('暂时无法刷新习惯')), focusSessionStore.refreshFromPersistence()])
+  await Promise.all([taskStore.refresh(), ambientStore.refreshFromPersistence(),
+    habitStore.refresh().catch(() => store.notify('暂时无法刷新习惯')),
+    focusSessionStore.refreshFromPersistence().then(() => timerStore.refreshFromPersistence())])
 }
 onMounted(() => {
+  const refreshTimer = () => { void timerStore.tick() }
+  stopNotifications = startNotifications(store.notify, refreshTimer, subscribeToTimerCompletions)
+  void timerStore.initialize()
+  timerInterval = window.setInterval(refreshTimer, 250)
   void habitStore.observeFocus().catch(() => store.notify('暂时无法读取本地习惯'))
   habitDateInterval = setInterval(() => habitStore.updateDate(), 30_000)
   window.addEventListener('focus', habitStore.updateDate)
@@ -58,6 +65,8 @@ onMounted(() => {
   void syncScheduler.start()
 })
 onUnmounted(() => {
+  stopNotifications?.()
+  window.clearInterval(timerInterval)
   clearInterval(habitDateInterval)
   habitStore.stopObserving()
   window.removeEventListener('focus', habitStore.updateDate)
