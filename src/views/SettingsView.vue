@@ -10,6 +10,7 @@ import { DataManagementError } from '../types/dataManagement'
 import { toUserMessage } from '../services/errors/userMessage'
 import NotificationSettings from '../components/notification/NotificationSettings.vue'
 import ThemePicker from '../components/ThemePicker.vue'
+import PwaSettings from '../components/pwa/PwaSettings.vue'
 
 const store = useAppStore()
 const timerStore = useTimerStore()
@@ -122,6 +123,7 @@ async function deleteAccount() {
         <a class="active" href="#appearance"><Palette :size="18" />外观与布局</a>
         <a href="#focus-preferences"><Clock3 :size="18" />专注偏好</a>
         <a href="#notifications"><Bell :size="18" />通知提醒</a>
+        <a href="#offline-app"><Download :size="18" />安装与离线</a>
       </nav>
 
       <div class="settings-content">
@@ -183,6 +185,7 @@ async function deleteAccount() {
         </section>
 
         <NotificationSettings />
+        <PwaSettings />
       </div>
     </div>
   </div>

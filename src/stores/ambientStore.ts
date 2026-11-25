@@ -7,6 +7,7 @@ import { useAppStore } from './app'
 export const ambientSettingsRepository = new SettingsRepository()
 const SETTINGS_ID = 'ambient-preferences'
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+let pendingSave = Promise.resolve()
 
 const cloneDefaults = () => structuredClone(DEFAULT_AMBIENT_PREFERENCES)
 const clamp = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : fallback
@@ -124,9 +125,18 @@ export const useAmbientStore = defineStore('ambient', {
     scheduleSave(delay = 0) {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => {
-        saveTimer = null
-        void ambientSettingsRepository.set(SETTINGS_ID, normalizeAmbientPreferences(this.preferences)).catch(() => useAppStore().notify('环境音偏好保存失败'))
+        void this.flushPending().catch(() => useAppStore().notify('环境音偏好保存失败'))
       }, delay)
+    },
+
+    async flushPending() {
+      if (saveTimer) {
+        clearTimeout(saveTimer)
+        saveTimer = null
+        const value = normalizeAmbientPreferences(this.preferences)
+        pendingSave = pendingSave.catch(() => undefined).then(() => ambientSettingsRepository.set(SETTINGS_ID, value))
+      }
+      await pendingSave
     },
   },
 })

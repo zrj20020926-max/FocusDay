@@ -17,6 +17,11 @@ const priorityFilter = ref<TaskPriority|''>('')
 const categoryFilter = ref('')
 const filtered = computed(() => taskStore.filterTasks({ search: search.value, status: statusFilter.value || undefined, priority: priorityFilter.value || undefined, categoryId: categoryFilter.value || undefined }))
 const columns: { key: TaskStatus; label: string; color: string }[] = [{key:'TODO',label:'待办',color:'#c2a473'},{key:'IN_PROGRESS',label:'进行中',color:'#92aa8b'},{key:'COMPLETED',label:'已完成',color:'#9ba4b3'}]
+const boardTasks = computed(() => {
+  const groups: Record<TaskStatus, typeof filtered.value> = { TODO: [], IN_PROGRESS: [], COMPLETED: [] }
+  for (const task of filtered.value) groups[task.status].push(task)
+  return groups
+})
 function drop(status: TaskStatus) { if (dragging.value) void taskStore.moveTask(dragging.value, status); dragging.value = null }
 function reorder(targetId: string) { if (dragging.value) void taskStore.reorderTask(dragging.value, targetId); dragging.value = null }
 function clearFilters() { statusFilter.value = ''; priorityFilter.value = ''; categoryFilter.value = '' }
@@ -44,10 +49,10 @@ function clearFilters() { statusFilter.value = ''; priorityFilter.value = ''; ca
       </section>
       <section v-else key="board" class="kanban">
         <div v-for="column in columns" :key="column.key" class="kanban-column" @dragover.prevent @drop="drop(column.key)">
-          <header><div><i :style="{background:column.color}"/><strong>{{column.label}}</strong><span>{{filtered.filter(t=>t.status===column.key).length}}</span></div><button><Plus :size="16"/></button></header>
-          <div v-for="task in filtered.filter(t=>t.status===column.key)" :key="task.id" class="kanban-card" draggable="true" @dragstart="dragging=task.id" @click="store.openTask(task.id)">
+          <header><div><i :style="{background:column.color}"/><strong>{{column.label}}</strong><span>{{boardTasks[column.key].length}}</span></div><button><Plus :size="16"/></button></header>
+          <div v-for="task in boardTasks[column.key]" :key="task.id" class="kanban-card" draggable="true" @dragstart="dragging=task.id" @click="store.openTask(task.id)">
             <GripVertical :size="15" class="kanban-grip"/><span class="category-pill"><i :style="{background:taskStore.getCategoryById(task.categoryId)?.color}"/>{{taskStore.getCategoryById(task.categoryId)?.name ?? '其他'}}</span><strong>{{task.title}}</strong><div><span><CalendarDays :size="14"/>{{formatTaskDate(task.dueDate)}}</span><span>{{task.estimatedDuration}} 分钟</span></div>
-          </div><div v-if="!filtered.filter(t=>t.status===column.key).length" class="column-empty">暂无任务</div><button class="add-card" @click="store.commandOpen=true"><Plus :size="15"/>添加任务</button>
+          </div><div v-if="!boardTasks[column.key].length" class="column-empty">暂无任务</div><button class="add-card" @click="store.commandOpen=true"><Plus :size="15"/>添加任务</button>
         </div>
       </section>
     </transition>

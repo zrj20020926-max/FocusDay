@@ -84,6 +84,7 @@ export const useTimerStore = defineStore('timer', {
     canStart: state => ['IDLE', 'COMPLETED', 'CANCELLED'].includes(state.timerState.status),
   },
   actions: {
+    async flushForReload() { await timerRepository.flush() },
     async initialize() {
       if (this.initialized) return
       if (initialization) return initialization
@@ -92,13 +93,15 @@ export const useTimerStore = defineStore('timer', {
           await timerRepository.initialize()
           this.timerState = service.restore()
           await confirmTimerWrite()
-          this.config = service.getConfig()
-          if (!await settingsRepository.get<TimerConfig>('timer-config')) await settingsRepository.set('timer-config', this.config)
-          this.records = service.getRecords()
+          const config = service.getConfig()
+          this.config = config
+          if (!await settingsRepository.get<TimerConfig>('timer-config')) await settingsRepository.set('timer-config', config)
+          const records = service.getRecords()
+          this.records = records
           this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
           const focusSessions = useFocusSessionStore()
           await focusSessions.initialize()
-          await focusSessions.syncTimerRecords(this.records, false)
+          await focusSessions.syncTimerRecords(records, false)
           this.initialized = true
         } catch (error) { this.fail(error) }
       })()
@@ -118,8 +121,9 @@ export const useTimerStore = defineStore('timer', {
         if (!changed) return
         await confirmTimerWrite()
         this.timerState = synchronized
-        this.records = service.getRecords()
-        await useFocusSessionStore().syncTimerRecords(this.records, true)
+        const records = service.getRecords()
+        this.records = records
+        await useFocusSessionStore().syncTimerRecords(records, true)
       } catch (error) { this.fail(error) }
       finally { tickInFlight = false }
     },
@@ -128,9 +132,10 @@ export const useTimerStore = defineStore('timer', {
       this.timerState = service.restore(true)
       await confirmTimerWrite()
       this.config = service.getConfig()
-      this.records = service.getRecords()
+      const records = service.getRecords()
+      this.records = records
       this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
-      await useFocusSessionStore().syncTimerRecords(this.records, false)
+      await useFocusSessionStore().syncTimerRecords(records, false)
     },
     async selectMode(mode: TimerMode) {
       return this.run(() => service.prepare(mode))
@@ -175,9 +180,10 @@ export const useTimerStore = defineStore('timer', {
     async updateConfig(update: TimerConfigUpdate) {
       try {
         if (!this.initialized) await this.initialize()
-        this.config = service.updateConfig(update)
+        const config = service.updateConfig(update)
+        this.config = config
         await timerRepository.flush()
-        await settingsRepository.set('timer-config', this.config)
+        await settingsRepository.set('timer-config', config)
         this.timerState = service.getState()
         useAppStore().notify('计时设置已保存')
         return true
@@ -186,11 +192,13 @@ export const useTimerStore = defineStore('timer', {
     async run(operation: () => TimerState): Promise<TimerState | null> {
       if (!this.initialized) await this.initialize()
       try {
-        this.timerState = operation()
+        const state = operation()
         await confirmTimerWrite()
+        this.timerState = state
         this.config = service.getConfig()
-        this.records = service.getRecords()
-        await useFocusSessionStore().syncTimerRecords(this.records, true)
+        const records = service.getRecords()
+        this.records = records
+        await useFocusSessionStore().syncTimerRecords(records, true)
         this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
         return this.timerState
       } catch (error) {

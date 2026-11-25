@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import type { Session, User } from '@supabase/supabase-js'
 import { AuthService, type AuthSubscription } from '../services/auth/AuthService'
-import { getSupabaseClient, isSupabaseConfigured } from '../services/supabase/client'
+import { getSupabaseClient, isSupabaseConfigured, shouldRestoreAuth } from '../services/supabase/client'
 import { accountService } from '../services/account/AccountService'
 import { toUserMessage } from '../services/errors/userMessage'
 
@@ -38,9 +38,10 @@ export const useAuthStore = defineStore('auth', {
     displayName: state => state.user?.user_metadata?.display_name as string | undefined || state.user?.email?.split('@')[0] || '本地用户',
   },
   actions: {
-    async initialize() {
-      if (this.initialized || !this.configured) { this.initialized = true; return }
+    async initialize(force = false) {
+      if (!this.configured || (this.initialized && !force)) { this.initialized = true; return }
       if (initialization) return initialization
+      if (!force && !shouldRestoreAuth()) { this.initialized = true; return }
       initialization = (async () => {
         this.loading = true
         try {
@@ -87,7 +88,11 @@ export const useAuthStore = defineStore('auth', {
       if (!this.configured) { this.error = 'Supabase 尚未配置，本地功能仍可正常使用'; return null }
       this.loading = true
       this.error = ''
-      try { return await operation() }
+      try {
+        const auth = await authService()
+        subscription ??= auth.onAuthStateChange((_event, session) => this.applySession(session))
+        return await operation()
+      }
       catch (error) { this.error = messageOf(error); return null }
       finally { this.loading = false }
     },

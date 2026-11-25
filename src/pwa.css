@@ -1,0 +1,41 @@
+.pwa-update {
+  position: fixed; z-index: 130; inset: auto 22px 22px auto; width: min(350px, calc(100% - 28px));
+  padding: 15px; color: var(--text); background: var(--card);
+  border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--modal-shadow);
+}
+.pwa-update strong, .pwa-saving > div { display: flex; align-items: center; gap: 9px; }
+.pwa-update strong svg { color: var(--green-dark); }
+.pwa-update p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 8px 0 12px; }
+.pwa-update-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pwa-saving { position: fixed; inset: 0; z-index: 200; background: var(--overlay); display: grid; place-items: center; padding: 16px; }
+.pwa-saving > div { background: var(--card); color: var(--text); padding: 14px 18px; border-radius: 14px; }
+.pwa-saving svg { animation: pwa-progress 1.1s linear infinite; }
+@keyframes pwa-progress { to { rotate: 360deg; } }
+@media (prefers-reduced-motion: reduce) { .pwa-saving svg { animation: none; } }
+
+@media (max-width: 850px) {
+  :root { --mobile-nav-height: calc(67px + env(safe-area-inset-bottom, 0px)); }
+  .sidebar {
+    height: var(--mobile-nav-height);
+    padding-bottom: calc(7px + env(safe-area-inset-bottom, 0px));
+    padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));
+  }
+  .main-stage { padding-bottom: var(--mobile-nav-height); }
+  .page { padding-top: calc(31px + env(safe-area-inset-top, 0px)); }
+  .pwa-update { right: max(14px, env(safe-area-inset-right, 0px)); bottom: calc(var(--mobile-nav-height) + 13px); }
+  .achievement-notice { bottom: calc(var(--mobile-nav-height) + 19px); }
+  .command-modal, .habit-form { max-height: calc(100dvh - max(72px, 16vh)); }
+  .task-drawer > header { padding-top: env(safe-area-inset-top, 0px); }
+  .task-drawer > footer { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .drawer-body, .command-modal { scroll-padding-bottom: 18px; overscroll-behavior: contain; }
+  .habit-drawer-content { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (max-width: 850px) and (pointer: coarse) {
+  .nav-item, .icon-button, .pwa-update button, .task-check, .drawer-check { touch-action: manipulation; }
+  .task-drawer .icon-button, .habit-drawer .icon-button, .focus-controls .control-secondary { min-width: 44px; min-height: 44px; }
+  .task-check, .drawer-check { position: relative; }
+  .task-check::after, .drawer-check::after { content: ""; position: absolute; inset: 50% auto auto 50%; translate: -50% -50%; width: 44px; height: 44px; }
+  .task-drawer .drawer-check { position: absolute; }
+  .quick-input input, .search-box input, .command-search input, .task-drawer input, .task-drawer textarea,
+  .task-drawer select, .habit-form input, .habit-form select, .habit-form textarea { font-size: 16px; }
+}

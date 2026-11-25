@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { useTaskStore } from './stores/taskStore'
@@ -16,9 +16,13 @@ import CommandPalette from './components/CommandPalette.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import FocusCompletionDialog from './components/FocusCompletionDialog.vue'
 import AchievementNotice from './components/achievement/AchievementNotice.vue'
+import PwaUpdateNotice from './components/pwa/PwaUpdateNotice.vue'
 import { PanelRightOpen } from 'lucide-vue-next'
 import { syncScheduler } from './services/sync/SyncScheduler'
 import { startNotifications } from './services/notification/notificationRuntime'
+import { pwa, startPwa } from './services/pwa/PwaRuntime'
+import { databaseService } from './services/database/DatabaseService'
+import { AUTH_STORAGE_KEY } from './services/supabase/client'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
@@ -36,8 +40,17 @@ void authStore.initialize()
 let habitDateInterval: ReturnType<typeof setInterval>
 let timerInterval: number
 let stopNotifications: (() => void) | undefined
+let stopPwa: (() => void) | undefined
+const stopSyncWatch = watch(() => authStore.isAuthenticated, authenticated => {
+  if (authenticated) void syncScheduler.start().catch(() => undefined)
+  else syncScheduler.stop()
+})
+function onAuthStorage(event: StorageEvent) {
+  if (event.key === AUTH_STORAGE_KEY) void authStore.initialize(true)
+}
 
 function onKeydown(e: KeyboardEvent) {
+  if (pwa.updating) { e.preventDefault(); return }
   if (e.repeat) return
   if (habitStore.drawerOpen || habitStore.formOpen) return
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); store.commandOpen = !store.commandOpen }
@@ -59,8 +72,14 @@ async function onDataSynced() {
     focusSessionStore.refreshFromPersistence().then(() => timerStore.refreshFromPersistence())])
 }
 onMounted(() => {
+  stopPwa = startPwa(async () => {
+    await nextTick()
+    await Promise.all([timerStore.flushForReload(), ambientStore.flushPending()])
+    // IndexedDB queues earlier writes before this barrier, including sync queue entries.
+    await databaseService.transaction(async () => undefined)
+  })
   achievementStore.start()
-  const refreshTimer = () => { void timerStore.tick() }
+  const refreshTimer = () => { if (!pwa.updating) void timerStore.tick() }
   stopNotifications = startNotifications(store.notify, refreshTimer, subscribeToTimerCompletions)
   void timerStore.initialize()
   timerInterval = window.setInterval(refreshTimer, 250)
@@ -69,9 +88,10 @@ onMounted(() => {
   window.addEventListener('focus', habitStore.updateDate)
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('focus-day:data-synced', onDataSynced)
-  void syncScheduler.start()
+  window.addEventListener('storage', onAuthStorage)
 })
 onUnmounted(() => {
+  stopPwa?.()
   achievementStore.stop()
   themeStore.stop()
   stopNotifications?.()
@@ -81,12 +101,13 @@ onUnmounted(() => {
   window.removeEventListener('focus', habitStore.updateDate)
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('focus-day:data-synced', onDataSynced)
-  syncScheduler.stop(); stopScrollWatch(); document.body.style.overflow = ''
+  window.removeEventListener('storage', onAuthStorage)
+  stopSyncWatch(); syncScheduler.stop(); stopScrollWatch(); document.body.style.overflow = ''
 })
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'panel-collapsed': !store.rightPanelOpen }">
+  <div class="app-shell" :class="{ 'panel-collapsed': !store.rightPanelOpen }" :inert="pwa.updating">
     <AppSidebar />
     <main class="main-stage">
       <router-view v-slot="{ Component }">
@@ -99,6 +120,7 @@ onUnmounted(() => {
     <TaskDrawer />
     <FocusCompletionDialog />
     <AchievementNotice />
+    <PwaUpdateNotice />
     <transition name="toast"><div v-if="store.toast" class="toast"><span class="toast-dot">✓</span>{{ store.toast }}</div></transition>
   </div>
 </template>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Focus Day placeholder icon">
+  <rect width="512" height="512" fill="#263b31"/>
+  <circle cx="256" cy="256" r="133" fill="none" stroke="#799784" stroke-width="12"/>
+  <path d="M256 123a133 133 0 0 1 133 133" fill="none" stroke="#ecf0de" stroke-linecap="round" stroke-width="12"/>
+  <path d="M256 182c7 45 29 67 74 74-45 7-67 29-74 74-7-45-29-67-74-74 45-7 67-29 74-74Z" fill="#ecf0de"/>
+  <circle cx="381" cy="163" r="9" fill="#ecf0de"/>
+</svg>

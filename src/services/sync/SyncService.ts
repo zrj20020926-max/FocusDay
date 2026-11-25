@@ -40,6 +40,8 @@ export class SyncService {
     return this.withTimeout(this.running)
   }
 
+  async whenIdle(): Promise<void> { await this.running?.catch(() => undefined) }
+
   private async perform(): Promise<void> {
     if (typeof navigator !== 'undefined' && !navigator.onLine) { await this.refreshStatus('OFFLINE'); return }
     this.status.setStatus('SYNCING')
@@ -58,6 +60,7 @@ export class SyncService {
       await this.refreshStatus('SYNCED', now)
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('focus-day:data-synced'))
     } catch (error) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) { await this.refreshStatus('OFFLINE'); return }
       const message = toUserMessage(error, '同步失败，本地数据已安全保留')
       const conflicts = await this.database.db.syncQueue.where('status').equals('CONFLICT').count().catch(() => 0)
       this.status.update({ status: conflicts ? 'CONFLICT' : 'ERROR', lastError: message, conflicts })
@@ -516,7 +519,7 @@ export class SyncService {
   private async refreshStatus(preferred?: 'SYNCED' | 'OFFLINE', lastSyncedAt?: string): Promise<void> {
     const pendingCount = await this.queue.countPending()
     const conflicts = await this.database.db.syncQueue.where('status').equals('CONFLICT').count()
-    this.status.update({ status: conflicts ? 'CONFLICT' : pendingCount ? 'PENDING' : preferred ?? 'SYNCED', pendingCount, conflicts,
+    this.status.update({ status: preferred === 'OFFLINE' ? 'OFFLINE' : conflicts ? 'CONFLICT' : pendingCount ? 'PENDING' : preferred ?? 'SYNCED', pendingCount, conflicts,
       lastSyncedAt: lastSyncedAt ?? this.status.getSnapshot().lastSyncedAt, lastError: null })
   }
   private withTimeout(operation: Promise<void>): Promise<void> {
