@@ -11,6 +11,7 @@ const authErrorLink = 'com.focusday.app://auth/account?error=access_denied'
 const openAuth = () => adb('shell', 'am', 'start', '-W', '-a', 'android.intent.action.VIEW', '-d', authErrorLink)
 const heading = (page, name) => page.getByRole('heading', { name, exact: true }).waitFor({ timeout: 15_000 })
 const syncFixture = process.argv.includes('--sqlite-sync')
+const backgroundTimer = process.argv.includes('--background-timer')
 
 async function usingWebView(check) {
   let pid
@@ -40,6 +41,10 @@ async function usingWebView(check) {
 
 adb('shell', 'wm', 'dismiss-keyguard')
 adb('shell', 'am', 'force-stop', packageName)
+if (backgroundTimer) {
+  await verifyBackgroundTimer()
+  process.exit(0)
+}
 if (!syncFixture) {
   adb('shell', 'am', 'start', '-W', '-n', `${packageName}/.MainActivity`)
   await usingWebView(verifyNavigation)
@@ -53,6 +58,173 @@ await usingWebView(async page => {
     console.log('Android cold auth link: OK')
   }
 })
+
+async function verifyBackgroundTimer() {
+  const permission = 'android.permission.POST_NOTIFICATIONS'
+  const launch = () => adb('shell', 'am', 'start', '-W', '-n', `${packageName}/.MainActivity`)
+  const openSettings = page => page.goto('https://localhost/settings')
+  const openFocus = page => page.goto('https://localhost/focus')
+  const focus = page => page.locator('.focus-page')
+  const begin = page => focus(page).getByRole('button', { name: '开始专注', exact: true }).click()
+  const pending = page => page.evaluate(async () => {
+    const result = await window.Capacitor.Plugins.LocalNotifications.getPending()
+    return result.notifications.filter(item => item.extra?.destination === '/focus').map(({ id }) => id)
+  })
+  const useCountdown = async (page, minutes = 1) => {
+    await openFocus(page)
+    const cancel = focus(page).getByRole('button', { name: '放弃本次计时' })
+    await expect(focus(page)).toHaveAttribute('aria-busy', 'false')
+    if (await cancel.isVisible()) await cancel.click()
+    await expect(focus(page).getByRole('button', { name: '开始专注', exact: true })).toBeVisible()
+    await focus(page).getByRole('button', { name: '倒计时', exact: true }).click()
+    const duration = focus(page).locator('.countdown-duration input')
+    await duration.fill(String(minutes))
+    await duration.blur()
+    await expect(focus(page).locator('.focus-time strong')).toHaveText(`0${minutes}:00`)
+  }
+  adb('shell', 'pm', 'revoke', packageName, permission)
+  adb('shell', 'pm', 'set-permission-flags', packageName, permission, 'user-set', 'user-fixed')
+  launch()
+  await usingWebView(async page => {
+    await openSettings(page)
+    const button = page.getByRole('button', { name: '切换系统通知' })
+    await expect(button).toBeVisible()
+    await expect(page.getByRole('switch', { name: '启用通知' })).toBeEnabled()
+    if (await button.isEnabled()) await button.click()
+    await expect(page.getByText(/权限已拒绝/)).toBeVisible()
+    await useCountdown(page)
+    await begin(page)
+    await expect(focus(page).getByRole('button', { name: '暂停一下' })).toBeVisible()
+    expect(await pending(page)).toEqual([])
+    await focus(page).getByRole('button', { name: '放弃本次计时' }).click()
+    await expect(focus(page).getByRole('button', { name: '开始专注', exact: true })).toBeVisible()
+  })
+  console.log('Android notification denial and local timer fallback: OK')
+
+  adb('shell', 'pm', 'clear-permission-flags', packageName, permission, 'user-fixed')
+  adb('shell', 'pm', 'grant', packageName, permission)
+  adb('shell', 'cmd', 'appops', 'set', packageName, 'SCHEDULE_EXACT_ALARM', 'allow')
+  launch()
+  try {
+    await usingWebView(async page => {
+      await openSettings(page)
+      const button = page.getByRole('button', { name: '切换系统通知' })
+      await expect(button).toBeEnabled()
+      if ((await button.innerText()).trim() === '开启') await button.click()
+      await expect(page.getByText('已允许。锁屏和省电时仍可能延迟。')).toBeVisible()
+      await useCountdown(page)
+      await begin(page)
+      await expect.poll(() => pending(page)).toHaveLength(1)
+      const [id] = await pending(page)
+      await focus(page).getByRole('button', { name: '暂停一下' }).click()
+      await expect.poll(() => pending(page)).toEqual([])
+      await focus(page).getByRole('button', { name: '继续专注' }).click()
+      await expect.poll(() => pending(page)).toEqual([id])
+      adb('shell', 'dumpsys', 'battery', 'unplug')
+      adb('shell', 'cmd', 'power', 'set-mode', '1')
+      await expect.poll(() => adb('shell', 'settings', 'get', 'global', 'low_power')).toBe('1')
+      adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
+      adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP')
+      await expect.poll(() => adb('shell', 'cmd', 'notification', 'list'), { timeout: 80_000, intervals: [2000] })
+        .toContain(`|${packageName}|${id}|`)
+      adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
+      adb('shell', 'wm', 'dismiss-keyguard')
+      launch()
+      await expect(focus(page).getByRole('button', { name: '开始专注', exact: true })).toBeVisible()
+      expect(await pending(page)).toEqual([])
+    })
+    console.log('Android native alarm delivered while backgrounded and locked in battery saver; pause/resume reused one alarm: OK')
+  } finally {
+    adb('shell', 'cmd', 'power', 'set-mode', '0')
+    adb('shell', 'dumpsys', 'battery', 'reset')
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
+    adb('shell', 'wm', 'dismiss-keyguard')
+  }
+
+  await usingWebView(async page => {
+    await useCountdown(page)
+    await begin(page)
+    await expect.poll(() => pending(page)).toHaveLength(1)
+    await focus(page).getByRole('button', { name: '暂停一下' }).click()
+    await expect(focus(page).getByRole('button', { name: '继续专注' })).toBeVisible()
+    await expect.poll(() => pending(page)).toEqual([])
+  })
+  adb('shell', 'am', 'force-stop', packageName)
+  launch()
+  await usingWebView(async page => {
+    await openFocus(page)
+    await expect(focus(page).getByRole('button', { name: '继续专注' })).toBeVisible()
+    const pausedTime = await focus(page).locator('.focus-time strong').textContent()
+    await focus(page).getByRole('button', { name: '继续专注' }).click()
+    await expect.poll(() => pending(page)).toHaveLength(1)
+    await focus(page).getByRole('button', { name: '放弃本次计时' }).click()
+    await expect.poll(() => pending(page)).toEqual([])
+    if (!pausedTime) throw new Error('Paused countdown did not restore its display.')
+  })
+  console.log('Android force-stop, durable paused recovery and cancel cleanup: OK')
+
+  await usingWebView(async page => {
+    await useCountdown(page, 2)
+    await begin(page)
+    await expect.poll(() => pending(page)).toHaveLength(1)
+  })
+  adb('reboot')
+  await expect.poll(() => {
+    try { return adb('shell', 'getprop', 'sys.boot_completed') } catch { return '' }
+  }, { timeout: 75_000, intervals: [2000] }).toBe('1')
+  adb('shell', 'wm', 'dismiss-keyguard')
+  await expect.poll(() => adb('shell', 'dumpsys', 'alarm')
+    .split('\n').some(line => line.includes(packageName) && line.includes('TimedNotificationPublisher')), { timeout: 20_000 }).toBe(true)
+  launch()
+  await usingWebView(async page => {
+    await openFocus(page)
+    await expect(focus(page).getByRole('button', { name: '暂停一下' })).toBeVisible()
+    await expect.poll(() => pending(page)).toHaveLength(1)
+    await focus(page).getByRole('button', { name: '放弃本次计时' }).click()
+    await expect.poll(() => pending(page)).toEqual([])
+  })
+  console.log('Android reboot, OS rearmed the future alarm and SQLite restored the running countdown: OK')
+
+  adb('shell', 'cmd', 'appops', 'set', packageName, 'SCHEDULE_EXACT_ALARM', 'deny')
+  launch()
+  let before
+  const completedCount = page => page.evaluate(async () => {
+    const result = await window.Capacitor.Plugins.CapacitorSQLite.query({
+      database: 'focus_day_guest', statement: "SELECT count(*) AS total FROM focusSessions WHERE status = 'COMPLETED'",
+      values: [], readonly: false,
+    })
+    return result.values[0].total
+  })
+  await usingWebView(async page => {
+    await openSettings(page)
+    await expect(page.getByText(/未允许。后台通知/)).toBeVisible()
+    await useCountdown(page, 2)
+    before = await completedCount(page)
+    await begin(page)
+    await expect.poll(() => pending(page)).toHaveLength(1)
+  })
+  adb('shell', 'am', 'force-stop', packageName)
+  const autoTime = adb('shell', 'settings', 'get', 'global', 'auto_time')
+  try {
+    adb('shell', 'settings', 'put', 'global', 'auto_time', '0')
+    adb('shell', 'cmd', 'alarm', 'set-time', String(Date.now() + 180_000))
+    launch()
+    await usingWebView(async page => {
+      await openFocus(page)
+      await expect(focus(page).locator('.focus-time strong')).toHaveText('00:00')
+      await expect.poll(() => completedCount(page)).toBe(before + 1)
+      await page.reload()
+      await expect(focus(page)).toHaveAttribute('aria-busy', 'false')
+      expect(await completedCount(page)).toBe(before + 1)
+      await expect.poll(() => pending(page)).toEqual([])
+    })
+  } finally {
+    adb('shell', 'cmd', 'alarm', 'set-time', String(Date.now()))
+    if (autoTime === 'null') adb('shell', 'settings', 'delete', 'global', 'auto_time')
+    else adb('shell', 'settings', 'put', 'global', 'auto_time', autoTime)
+  }
+  console.log('Android inexact fallback, clock change after force-stop and single persisted completion: OK')
+}
 
 async function verifyNavigation(page) {
   await page.getByPlaceholder('添加一个任务，按 Enter 保存').waitFor({ timeout: 15_000 })

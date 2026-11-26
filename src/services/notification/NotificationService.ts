@@ -15,9 +15,10 @@ export interface NotificationDelivery {
   requestPermission(): Promise<BrowserNotificationPermission>
   system(event: NotificationEvent): Promise<void>
   sound(): Promise<void>
+  handlesSystemSound?: boolean
 }
 
-function allows(event: NotificationEvent, preferences: NotificationPreferences): boolean {
+export function allowsNotification(event: NotificationEvent, preferences: NotificationPreferences): boolean {
   if (!preferences.enabled) return false
   switch (event.kind) {
     case 'TASK_DUE': return preferences.tasks
@@ -36,6 +37,14 @@ const phaseMessages = {
 } as const
 
 export const TIMER_NOTIFICATION_MAX_DELAY = 10 * 60_000
+
+export function timerNotification(phase: TimerPhaseCompletion): NotificationEvent {
+  return {
+    id: `timer:${phase.sessionId}:${phase.phaseSequence}`,
+    ...phaseMessages[phase.mode === 'COUNTDOWN' ? 'COUNTDOWN' : phase.phase],
+    occurredAt: phase.completedAt,
+  }
+}
 
 export class NotificationService {
   private settingsWrite: Promise<unknown> = Promise.resolve()
@@ -80,12 +89,13 @@ export class NotificationService {
 
   async publish(event: NotificationEvent, current = () => true): Promise<boolean> {
     const preferences = await this.preferences()
-    if (!current() || !allows(event, preferences)) return false
+    if (!current() || !allowsNotification(event, preferences)) return false
     if (!await this.delivery.claim(event.id, this.now()) || !current()) return false
     this.delivery.toast(event)
     const effects: Promise<void>[] = []
-    if (preferences.system && this.permission() === 'granted') effects.push(Promise.resolve().then(() => this.delivery.system(event)))
-    if (preferences.sound) effects.push(Promise.resolve().then(() => this.delivery.sound()))
+    const system = preferences.system && this.permission() === 'granted'
+    if (system) effects.push(Promise.resolve().then(() => this.delivery.system(event)))
+    if (preferences.sound && !(system && this.delivery.handlesSystemSound)) effects.push(Promise.resolve().then(() => this.delivery.sound()))
     await Promise.allSettled(effects)
     return true
   }
@@ -94,10 +104,6 @@ export class NotificationService {
     // On resume only report the latest phase rather than replaying a series of old rounds.
     const phase = phases[phases.length - 1]
     if (!phase || this.now() - phase.completedAt > TIMER_NOTIFICATION_MAX_DELAY) return false
-    return this.publish({
-      id: `timer:${phase.sessionId}:${phase.phaseSequence}`,
-      ...phaseMessages[phase.mode === 'COUNTDOWN' ? 'COUNTDOWN' : phase.phase],
-      occurredAt: phase.completedAt,
-    })
+    return this.publish(timerNotification(phase))
   }
 }

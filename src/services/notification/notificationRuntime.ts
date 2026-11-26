@@ -3,6 +3,8 @@ import { NotificationService } from './NotificationService'
 import { BrowserNotificationDelivery } from './BrowserNotificationDelivery'
 import { ReminderScheduler } from './ReminderScheduler'
 import type { TimerPhaseCompletion } from '../../types/timer'
+import { nativeNotificationPermission, requestNativeNotificationPermission, usesNativeNotifications, wasNativeNotificationDelivered } from './nativeNotifications'
+import { databaseService } from '../database/DatabaseService'
 
 export const reminderRepository = new ReminderRepository()
 export const browserNotifications = new BrowserNotificationDelivery()
@@ -12,22 +14,25 @@ let showToast: ((message: string) => void) | null = null
 export const notificationService = new NotificationService(reminderRepository, {
   async claim(id, now) {
     if (seen.has(id)) return false
+    const delivered = await wasNativeNotificationDelivered(databaseService.owner ?? 'guest', id).catch(() => false)
     const first = await reminderRepository.claim(id, now)
     seen.add(id)
     if (seen.size > 1000) seen.delete(seen.values().next().value!)
-    return first
+    return first && !delivered
   },
   toast: event => showToast?.(`${event.title} · ${event.body}`),
-  permission: () => browserNotifications.permission(),
-  requestPermission: () => browserNotifications.requestPermission(),
-  system: event => browserNotifications.system(event),
+  permission: () => usesNativeNotifications ? nativeNotificationPermission() : browserNotifications.permission(),
+  requestPermission: () => usesNativeNotifications ? requestNativeNotificationPermission() : browserNotifications.requestPermission(),
+  async system(event) { if (!usesNativeNotifications) await browserNotifications.system(event) },
   sound: () => browserNotifications.sound(),
+  handlesSystemSound: usesNativeNotifications,
 })
 
 export function startNotifications(
   notify: (message: string) => void,
   refreshTimer: () => void,
   subscribeTimer: (listener: (phases: readonly TimerPhaseCompletion[]) => void) => () => void,
+  foreground = () => true,
 ) {
   const scheduler = new ReminderScheduler(notificationService)
   let soundEnabled = false
@@ -55,12 +60,13 @@ export function startNotifications(
     },
     error: () => { soundEnabled = false },
   })
-  const poll = () => { void scheduler.check() }
-  const resume = () => { refreshTimer(); poll() }
+  const poll = () => { if (foreground()) void scheduler.check() }
+  const resume = () => { if (foreground() && !document.hidden) { refreshTimer(); poll() } }
   const unlock = () => { if (soundEnabled) void browserNotifications.unlockAudio().catch(() => undefined) }
   const interval = window.setInterval(poll, 15_000)
   window.addEventListener('focus', resume)
   window.addEventListener('pageshow', resume)
+  window.addEventListener('focus-day:foreground', resume)
   document.addEventListener('visibilitychange', resume)
   window.addEventListener('pointerdown', unlock)
   window.addEventListener('keydown', unlock)
@@ -70,6 +76,7 @@ export function startNotifications(
     window.clearInterval(interval)
     window.removeEventListener('focus', resume)
     window.removeEventListener('pageshow', resume)
+    window.removeEventListener('focus-day:foreground', resume)
     document.removeEventListener('visibilitychange', resume)
     window.removeEventListener('pointerdown', unlock)
     window.removeEventListener('keydown', unlock)

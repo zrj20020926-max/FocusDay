@@ -1,5 +1,4 @@
 import { defineStore } from 'pinia'
-import { toRaw } from 'vue'
 import { TimerRepository } from '../services/database/repositories/TimerRepository'
 import { SettingsRepository } from '../services/database/repositories/SettingsRepository'
 import { TimerCalculator, formatTimerDuration } from '../services/timer/TimerCalculator'
@@ -13,8 +12,15 @@ const timerRepository = new TimerRepository()
 const settingsRepository = new SettingsRepository()
 const service = new TimerService(timerRepository)
 let initialization: Promise<void> | null = null
-let tickInFlight = false
+let operations = Promise.resolve<unknown>(undefined)
+let tickInFlight: Promise<void> | undefined
 const phaseListeners = new Set<(phases: readonly TimerPhaseCompletion[]) => void>()
+
+function serializeTimer<T>(operation: () => Promise<T>): Promise<T> {
+  const next = operations.then(operation)
+  operations = next.catch(() => undefined)
+  return next
+}
 
 export function subscribeToTimerCompletions(listener: (phases: readonly TimerPhaseCompletion[]) => void): () => void {
   phaseListeners.add(listener)
@@ -22,8 +28,8 @@ export function subscribeToTimerCompletions(listener: (phases: readonly TimerPha
 }
 
 async function confirmTimerWrite() {
-  const phases = service.takeCompletedPhases()
   await timerRepository.flush()
+  const phases = service.takeCompletedPhases()
   if (!phases.length) return
   for (const listener of phaseListeners) {
     try { listener(phases) } catch { /* A notification must not alter the confirmed timer state. */ }
@@ -84,15 +90,16 @@ export const useTimerStore = defineStore('timer', {
     canStart: state => ['IDLE', 'COMPLETED', 'CANCELLED'].includes(state.timerState.status),
   },
   actions: {
-    async flushForReload() { await timerRepository.flush() },
+    async flushForReload() { await initialization; await operations; await timerRepository.flush() },
     async initialize() {
       if (this.initialized) return
       if (initialization) return initialization
       initialization = (async () => {
         try {
           await timerRepository.initialize()
-          this.timerState = service.restore()
+          const restored = service.restore(true)
           await confirmTimerWrite()
+          this.timerState = restored
           const config = service.getConfig()
           this.config = config
           if (!await settingsRepository.get<TimerConfig>('timer-config')) await settingsRepository.set('timer-config', config)
@@ -108,34 +115,40 @@ export const useTimerStore = defineStore('timer', {
       await initialization
       initialization = null
     },
-    async tick() {
-      if (tickInFlight) return
-      tickInFlight = true
-      if (!this.initialized) await this.initialize()
-      const previousPhase = this.timerState.currentPhase
-      const previousStatus = this.timerState.status
-      this.nowMs = Math.max(this.nowMs, Date.now(), this.timerState.lastObservedAt)
-      try {
-        const synchronized = service.synchronize()
-        const changed = synchronized.updatedAt !== this.timerState.updatedAt || synchronized.status !== previousStatus || synchronized.currentPhase !== previousPhase
-        if (!changed) return
-        await confirmTimerWrite()
-        this.timerState = synchronized
-        const records = service.getRecords()
-        this.records = records
-        await useFocusSessionStore().syncTimerRecords(records, true)
-      } catch (error) { this.fail(error) }
-      finally { tickInFlight = false }
+    tick(): Promise<void> {
+      tickInFlight ??= serializeTimer(async () => {
+        if (!this.initialized) await this.initialize()
+        if (!this.initialized) return
+        this.nowMs = Math.max(this.nowMs, Date.now(), this.timerState.lastObservedAt)
+        try {
+          const synchronized = service.synchronize()
+          const changed = synchronized.updatedAt !== this.timerState.updatedAt ||
+            synchronized.status !== this.timerState.status || synchronized.phaseSequence !== this.timerState.phaseSequence
+          if (!changed) return
+          await confirmTimerWrite()
+          this.timerState = synchronized
+          const records = service.getRecords()
+          this.records = records
+          await useFocusSessionStore().syncTimerRecords(records, true)
+        } catch (error) { this.fail(error) }
+      }).finally(() => { tickInFlight = undefined })
+      return tickInFlight
     },
     async refreshFromPersistence() {
-      await timerRepository.reload()
-      this.timerState = service.restore(true)
-      await confirmTimerWrite()
-      this.config = service.getConfig()
-      const records = service.getRecords()
-      this.records = records
-      this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
-      await useFocusSessionStore().syncTimerRecords(records, false)
+      await serializeTimer(async () => {
+        if (!this.initialized) await this.initialize()
+        await timerRepository.reload()
+        const restored = service.restore(true)
+        await confirmTimerWrite()
+        this.timerState = restored
+        this.config = service.getConfig()
+        const records = service.getRecords()
+        this.records = records
+        this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
+        const sessions = useFocusSessionStore()
+        await sessions.refreshFromPersistence()
+        await sessions.syncTimerRecords(records, false)
+      })
     },
     async selectMode(mode: TimerMode) {
       return this.run(() => service.prepare(mode))
@@ -164,11 +177,11 @@ export const useTimerStore = defineStore('timer', {
       return state
     },
     async cancel() {
-      const before = structuredClone(toRaw(this.timerState))
-      const cancelAt = Math.max(this.nowMs, Date.now(), before.lastObservedAt)
-      const cancelledDuration = before.currentPhase === 'FOCUS' ? TimerCalculator.phaseElapsed(before, cancelAt) : 0
-      const state = await this.run(() => service.cancel())
-      if (state) {
+      let before: TimerState | undefined
+      const state = await this.run(() => { before = service.getState(); return service.cancel() })
+      if (state && before && ['RUNNING', 'PAUSED'].includes(before.status)) {
+        const cancelAt = state.endTime ?? Date.now()
+        const cancelledDuration = before.currentPhase === 'FOCUS' ? TimerCalculator.phaseElapsed(before, cancelAt) : 0
         await useFocusSessionStore().recordCancellation(before, cancelledDuration, state.endTime ?? this.nowMs)
         useAppStore().notify('已放弃本次计时，不计入统计')
       }
@@ -178,36 +191,48 @@ export const useTimerStore = defineStore('timer', {
     async setTask(taskId: string | null) { return this.run(() => service.setTask(taskId)) },
     async setHabit(habitId: string | null) { return this.run(() => service.setHabit(habitId)) },
     async updateConfig(update: TimerConfigUpdate) {
-      try {
-        if (!this.initialized) await this.initialize()
-        const config = service.updateConfig(update)
-        this.config = config
-        await timerRepository.flush()
-        await settingsRepository.set('timer-config', config)
-        this.timerState = service.getState()
-        useAppStore().notify('计时设置已保存')
-        return true
-      } catch (error) { this.fail(error); return false }
+      return serializeTimer(async () => {
+        try {
+          if (!this.initialized) await this.initialize()
+          if (!this.initialized) return false
+          const config = service.updateConfig(update)
+          await confirmTimerWrite()
+          this.config = config
+          this.timerState = service.getState()
+          await settingsRepository.set('timer-config', config)
+          useAppStore().notify('计时设置已保存')
+          return true
+        } catch (error) { this.fail(error); return false }
+      })
     },
     async run(operation: () => TimerState): Promise<TimerState | null> {
-      if (!this.initialized) await this.initialize()
-      try {
-        const state = operation()
-        await confirmTimerWrite()
-        this.timerState = state
-        this.config = service.getConfig()
-        const records = service.getRecords()
-        this.records = records
-        await useFocusSessionStore().syncTimerRecords(records, true)
-        this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
-        return this.timerState
-      } catch (error) {
-        // A timing boundary can be reached just before a pause or cancellation is requested.
-        await confirmTimerWrite().catch(() => undefined)
-        if (error instanceof TimerDomainError && this.initialized) this.timerState = service.getState()
-        this.fail(error)
-        return null
-      }
+      return serializeTimer(async () => {
+        if (!this.initialized) await this.initialize()
+        if (!this.initialized) return null
+        try {
+          const state = operation()
+          await confirmTimerWrite()
+          this.timerState = state
+          this.config = service.getConfig()
+          const records = service.getRecords()
+          this.records = records
+          await useFocusSessionStore().syncTimerRecords(records, true)
+          this.nowMs = Math.max(Date.now(), this.timerState.lastObservedAt)
+          return this.timerState
+        } catch (error) {
+          // An operation may cross a natural boundary just before becoming invalid.
+          if (error instanceof TimerDomainError) {
+            try {
+              await confirmTimerWrite()
+              this.timerState = service.getState()
+              this.records = service.getRecords()
+              await useFocusSessionStore().syncTimerRecords(this.records, true)
+            } catch (writeError) { this.fail(writeError); return null }
+          }
+          this.fail(error)
+          return null
+        }
+      })
     },
     fail(error: unknown) {
       this.lastError = errorMessage(error)

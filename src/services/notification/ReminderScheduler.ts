@@ -25,11 +25,8 @@ export function isHabitReminder(value: unknown): value is HabitReminder {
     && 'time' in value && typeof value.time === 'string' && TIME.test(value.time)
 }
 
-export function reminderEvents(schedule: ReminderSchedule, now: number): NotificationEvent[] {
-  const today = new Date(now)
-  const dateKey = localDateKey(today)
+function taskEvents(schedule: ReminderSchedule): NotificationEvent[] {
   const events: NotificationEvent[] = []
-  const isDue = (at: number) => at <= now && now - at <= REMINDER_MAX_DELAY
 
   for (const { target, rule } of schedule.tasks) {
     if (target.status === 'COMPLETED') continue
@@ -42,7 +39,7 @@ export function reminderEvents(schedule: ReminderSchedule, now: number): Notific
       deadline.setDate(deadline.getDate() + 1)
       at = deadline.getTime() - rule.minutes * 60_000
     }
-    if (!isDue(at)) continue
+    if (!Number.isFinite(at)) continue
     const suffix = rule.kind === 'AT' ? `at:${at}` : `due:${target.dueDate}:${rule.minutes}`
     events.push({
       id: `task:${target.id}:${suffix}`, kind: 'TASK_DUE',
@@ -50,19 +47,43 @@ export function reminderEvents(schedule: ReminderSchedule, now: number): Notific
     })
   }
 
+  return events
+}
+
+function habitEvents(schedule: ReminderSchedule, day: Date): NotificationEvent[] {
+  const events: NotificationEvent[] = []
+  const dateKey = localDateKey(day)
   for (const { target, rule } of schedule.habits) {
     if (target.status !== 'ACTIVE' || dateKey < target.startDate) continue
-    if (target.frequency === 'WEEKDAYS' && !target.weekdays.includes(today.getDay())) continue
+    if (target.frequency === 'WEEKDAYS' && !target.weekdays.includes(day.getDay())) continue
     const [hours, minutes] = rule.time.split(':').map(Number)
     // setHours follows the device time zone, advancing nonexistent DST wall times.
-    const at = new Date(today).setHours(hours, minutes, 0, 0)
-    if (!isDue(at)) continue
+    const at = new Date(day).setHours(hours, minutes, 0, 0)
     events.push({
       id: `habit:${target.id}:${dateKey}`, kind: 'HABIT_DAILY',
       title: '习惯提醒', body: target.name, occurredAt: at,
     })
   }
-  return events.sort((a, b) => a.occurredAt - b.occurredAt)
+  return events
+}
+
+export function reminderEvents(schedule: ReminderSchedule, now: number): NotificationEvent[] {
+  const today = new Date(now)
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  return [...taskEvents(schedule), ...habitEvents(schedule, yesterday), ...habitEvents(schedule, today)]
+    .filter(event => event.occurredAt <= now && now - event.occurredAt <= REMINDER_MAX_DELAY)
+    .sort((a, b) => a.occurredAt - b.occurredAt)
+}
+
+export function upcomingReminderEvents(schedule: ReminderSchedule, now: number): NotificationEvent[] {
+  const events = taskEvents(schedule)
+  const day = new Date(now)
+  for (let index = 0; index < 7; index++) {
+    events.push(...habitEvents(schedule, day))
+    day.setDate(day.getDate() + 1)
+  }
+  return events.filter(event => event.occurredAt > now).sort((a, b) => a.occurredAt - b.occurredAt)
 }
 
 export class ReminderScheduler {

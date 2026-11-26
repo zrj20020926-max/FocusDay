@@ -10,6 +10,7 @@ import { dataManagementService } from '../services/data/DataManagementService'
 import { clearStoredNativeSession, readStoredWebSession } from '../services/supabase/NativeAuthStorage'
 import { syncScheduler } from '../services/sync/SyncScheduler'
 import { syncService } from '../services/sync/SyncService'
+import { clearNativeNotifications } from '../services/notification/nativeNotifications'
 
 let service: AuthService | null = null
 let subscription: AuthSubscription | null = null
@@ -130,7 +131,7 @@ export const useAuthStore = defineStore('auth', {
           document.body.style.visibility = 'hidden'
           // Recreate all stores under the new account without exposing cached data.
           const recovery = new URLSearchParams(window.location.search).get('mode') === 'update-password'
-          void databaseService.closeForReload().catch(() => undefined).then(() => {
+          void clearNativeNotifications().catch(() => undefined).then(() => databaseService.closeForReload()).catch(() => undefined).then(() => {
             window.location.replace(recovery ? '/account?mode=update-password' : destination)
           })
         }

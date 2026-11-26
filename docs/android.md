@@ -43,3 +43,14 @@ Android 的密码登录仍使用现有账号服务。注册确认和密码重置
 生产 Web 域名的 `/account` 仍需按 Web 部署分别配置。开发阶段通过自定义 scheme 接收链接，仅处理指定账号路由。生产阶段可评估绑定正式 HTTPS 域名的 Android App Links。
 
 参考 [Capacitor 7 环境要求](https://capacitorjs.com/docs/v7/getting-started/environment-setup) 和 [Supabase 移动端认证链接](https://supabase.com/docs/guides/auth/native-mobile-deep-linking)。
+
+## 后台计时与原生提醒
+
+- 开始、暂停、恢复和结束会先提交 SQLite 计时快照。前台刷新、恢复、云端快照读取和用户操作依次执行。回到前台或冷启动时，TimerService 根据持久化的 `endTime` 与当前时间补算经过的阶段。原生通知点击只负责打开路由，专注记录按计时来源去重。
+- Capacitor App 生命周期在进入后台时停止计时界面刷新。在回到前台时重新校准计时、更新通知权限和同步。锁屏期间的提醒由 Android AlarmManager 投递，应用无需启动前台服务或常驻 JavaScript。
+- 在「设置 → 通知提醒」开启系统通知。Android 13 及以上使用 `POST_NOTIFICATIONS`，Android 12 及以上的「精确提醒」由用户在系统设置中单独允许。精确提醒未获允许时使用非精确调度，系统通知未获允许时继续提供应用内提示。计时与任务习惯提醒分别有有声和静音渠道，任务和习惯标题不会写入锁屏通知。
+- 番茄钟预排接下来三个阶段，倒计时预排一次，正计时没有预定结束提醒。习惯预排接下来七个本地日历日，任务和习惯合计只预排最近 56 条。退到后台前的已知设置会用于调度；其他设备的修改在本机同步后生效。系统时区改变后，前台会重新生成日历提醒。
+- Android 重启并解锁后恢复仍在未来的提醒，已过期的阶段由应用打开时补算。若用户从系统设置强行停止应用，Android 会撤销该应用的闹钟。省电模式、勿扰模式、通知渠道设置和设备厂商限制均可能延迟或抑制提醒。计时恢复仍以 SQLite 的时间戳为准。
+- 离线期间各设备可以独立计时。重新联网后沿用云端单账号活动计时约束和冲突处理，无法在离线时预先阻止其他设备开始。
+
+在一次性 Android API 35 模拟器上安装 Debug APK，设置 `ADB_PATH` 和 `ANDROID_SERIAL` 后运行 `node scripts/verify-android.mjs --background-timer`。脚本会设置模拟器的通知权限，执行锁屏、省电模式、强制停止、重启和系统时钟变更测试。物理 Android 设备、不同厂商的省电策略、真实远端多设备和 iOS 运行仍需独立验收。

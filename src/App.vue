@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { useTaskStore } from './stores/taskStore'
@@ -30,6 +30,8 @@ import { Capacitor } from '@capacitor/core'
 import { startNativeNavigation } from './services/platform/NativeNavigation'
 import { applyNativeStatusBar } from './services/platform/NativeStatusBar'
 import { observeMobileLayout } from './composables/mobileLayout'
+import { observeNativeLifecycle } from './services/platform/NativeLifecycle'
+import { startNativeNotifications } from './services/notification/nativeNotifications'
 
 const store = useAppStore()
 const taskStore = useTaskStore()
@@ -46,10 +48,13 @@ const router = useRouter()
 void taskStore.initialize()
 void authStore.initialize()
 let habitDateInterval: ReturnType<typeof setInterval>
-let timerInterval: number
+let timerInterval: number | undefined
 let stopNotifications: (() => void) | undefined
 let stopPwa: (() => void) | undefined
 let stopNative: (() => void) | undefined
+let stopLifecycle: (() => void) | undefined
+let nativeNotifications: ReturnType<typeof startNativeNotifications> | undefined
+let nativeForeground = true
 const stopMobile = observeMobileLayout()
 let leaving = false
 const statusBar = () => {
@@ -103,11 +108,46 @@ const stopScrollWatch = watch(
 async function onDataSynced() {
   await Promise.all([taskStore.refresh(), ambientStore.refreshFromPersistence(),
     habitStore.refresh().catch(() => store.notify('暂时无法刷新习惯')),
-    focusSessionStore.refreshFromPersistence().then(() => timerStore.refreshFromPersistence())])
+    timerStore.refreshFromPersistence()])
+}
+const refreshTimer = () => {
+  if (nativeForeground && !pwa.updating) void timerStore.tick()
+}
+const stopTimerWatch = watch(
+  () => timerStore.initialized ? timerStore.timerState : undefined,
+  () => { void nativeNotifications?.update() },
+)
+function runNativeLifecycle(foreground: boolean) {
+  nativeForeground = foreground
+  window.clearInterval(timerInterval)
+  timerInterval = undefined
+  if (foreground) {
+    timerInterval = window.setInterval(refreshTimer, 250)
+    habitStore.updateDate()
+    void timerStore.tick().then(() => nativeNotifications?.refresh())
+    window.dispatchEvent(new Event('focus-day:foreground'))
+    syncScheduler.schedule(250)
+  } else {
+    void timerStore.flushForReload().then(() => nativeNotifications?.update()).catch(() => undefined)
+  }
 }
 onMounted(() => {
   statusBar()
   if (Capacitor.isNativePlatform()) {
+    nativeNotifications = startNativeNotifications({
+      scope: databaseService.owner ?? 'guest',
+      state: () => timerStore.initialized ? toRaw(timerStore.timerState) : undefined,
+      notify: store.notify,
+      async open(path) {
+        await timerStore.tick()
+        await router.isReady()
+        if (!leaving) await router.push(path)
+      },
+    })
+    void observeNativeLifecycle(runNativeLifecycle).then(dispose => {
+      if (leaving) dispose()
+      else stopLifecycle = dispose
+    }).catch(() => undefined)
     void startNativeNavigation({
       router, dismissOverlay: dismissNativeOverlay,
       exchangeAuthCode: (code, recoverPassword) => authStore.exchangeNativeAuthCode(code, recoverPassword),
@@ -122,8 +162,7 @@ onMounted(() => {
     await databaseService.transaction(async () => undefined)
   })
   achievementStore.start()
-  const refreshTimer = () => { if (!pwa.updating) void timerStore.tick() }
-  stopNotifications = startNotifications(store.notify, refreshTimer, subscribeToTimerCompletions)
+  stopNotifications = startNotifications(store.notify, refreshTimer, subscribeToTimerCompletions, () => nativeForeground)
   void timerStore.initialize()
   timerInterval = window.setInterval(refreshTimer, 250)
   void habitStore.observeFocus().catch(() => store.notify('暂时无法读取本地习惯'))
@@ -138,6 +177,9 @@ onUnmounted(() => {
   stopMobile()
   stopStatusBar()
   stopNative?.()
+  stopLifecycle?.()
+  stopTimerWatch()
+  nativeNotifications?.stop()
   stopPwa?.()
   achievementStore.stop()
   themeStore.stop()
