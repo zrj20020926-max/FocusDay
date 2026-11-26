@@ -1,4 +1,6 @@
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core'
 import type { Router } from 'vue-router'
+import { observeIOSEdgeBack } from './iosEdgeBack'
 import { parseNativeAuthUrl } from './nativeAuth'
 
 interface NativeNavigationOptions {
@@ -14,10 +16,14 @@ export async function startNativeNavigation({ router, dismissOverlay, exchangeAu
   const { App } = await import('@capacitor/app')
   const handled = new Set<string>()
   let active = true
+  let backListener: PluginListenerHandle | undefined
+  let stopEdgeBack: (() => void) | undefined
 
   async function openUrl(url: string) {
     const callback = parseNativeAuthUrl(url)
-    if (!active || !callback) return
+    if (!callback) return
+    await router.isReady()
+    if (!active) return
     if ('failed' in callback) {
       authFailed()
       await router.replace({ name: 'account' })
@@ -37,12 +43,20 @@ export async function startNativeNavigation({ router, dismissOverlay, exchangeAu
 
   const urlListener = await App.addListener('appUrlOpen', ({ url }) => { void openUrl(url).catch(authFailed) })
   try {
-    const backListener = await App.addListener('backButton', ({ canGoBack }) => {
-      if (dismissOverlay()) return
-      if (canGoBack && window.history.state?.back) router.back()
-      else if (router.currentRoute.value.name !== 'today') void router.replace({ name: 'today' })
-      else void App.minimizeApp()
-    })
+    if (Capacitor.getPlatform() === 'ios') {
+      stopEdgeBack = observeIOSEdgeBack(() => {
+        if (dismissOverlay()) return true
+        if (window.history.state?.back) { router.back(); return true }
+        return false
+      })
+    } else {
+      backListener = await App.addListener('backButton', ({ canGoBack }) => {
+        if (dismissOverlay()) return
+        if (canGoBack && window.history.state?.back) router.back()
+        else if (router.currentRoute.value.name !== 'today') void router.replace({ name: 'today' })
+        else void App.minimizeApp()
+      })
+    }
     void App.getLaunchUrl().then(launch => {
       // The activity retains its launch intent when only the WebView reloads.
       if (!active || sessionStorage.getItem(LAUNCH_HANDLED_KEY)) return
@@ -52,7 +66,8 @@ export async function startNativeNavigation({ router, dismissOverlay, exchangeAu
     return () => {
       active = false
       void urlListener.remove()
-      void backListener.remove()
+      void backListener?.remove()
+      stopEdgeBack?.()
     }
   } catch (error) {
     active = false

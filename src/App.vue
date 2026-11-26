@@ -129,6 +129,9 @@ function runNativeLifecycle(foreground: boolean) {
     syncScheduler.schedule(250)
   } else {
     void timerStore.flushForReload().then(() => nativeNotifications?.update()).catch(() => undefined)
+    if (Capacitor.getPlatform() === 'ios' && ambientStore.audioActive) {
+      void ambientStore.releaseAudio().catch(() => undefined)
+    }
   }
 }
 onMounted(() => {

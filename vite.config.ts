@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { loadEnv } from 'vite'
 
 export default defineConfig(({ mode }) => {
+  const native = mode === 'android' || mode === 'ios'
   const publicEnv = loadEnv(mode, '.', 'VITE_')
   const key = publicEnv.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? ''
   const jwtPayload = key.split('.')[1]
@@ -15,14 +16,14 @@ export default defineConfig(({ mode }) => {
     || Object.keys(publicEnv).some(name => /^VITE_SUPABASE_.*(?:SECRET|SERVICE_ROLE)/i.test(name) && publicEnv[name])) {
     throw new Error('客户端构建只允许使用 Supabase Publishable Key 或旧版 anon key。')
   }
-  if (mode === 'android' && publicEnv.VITE_SUPABASE_URL && !publicEnv.VITE_SUPABASE_URL.trim().startsWith('https://')) {
-    throw new Error('Android 的 Supabase URL 必须使用 HTTPS。')
+  if (native && publicEnv.VITE_SUPABASE_URL && !publicEnv.VITE_SUPABASE_URL.trim().startsWith('https://')) {
+    throw new Error('原生构建的 Supabase URL 必须使用 HTTPS。')
   }
   return {
     plugins: [
       vue(),
       VitePWA({
-        disable: mode === 'android',
+        disable: native,
         injectRegister: null,
         registerType: 'prompt',
         manifest: {

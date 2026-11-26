@@ -16,7 +16,7 @@ import { Capacitor } from '@capacitor/core'
 const store = useAppStore()
 const timerStore = useTimerStore()
 const authStore = useAuthStore()
-const showWebInstall = import.meta.env.MODE !== 'android' && !Capacitor.isNativePlatform()
+const showWebInstall = !['android', 'ios'].includes(import.meta.env.MODE) && !Capacitor.isNativePlatform()
 const { snapshot: syncSnapshot, syncNow } = useSyncStatus()
 const syncing = computed(() => syncSnapshot.value.status === 'SYNCING')
 const syncLabel = computed(() => ({ SYNCED: '已同步', SYNCING: '同步中', PENDING: '等待同步', OFFLINE: '离线', ERROR: '同步异常', CONFLICT: '存在冲突' }[syncSnapshot.value.status]))
@@ -65,7 +65,10 @@ async function manualSync() {
 }
 async function exportData() {
   dataBusy.value = true
-  try { dataManagementService.download(await dataManagementService.createBackup(authStore.user?.id ?? null)); store.notify('数据备份已导出') }
+  try {
+    const backup = await dataManagementService.createBackup(authStore.user?.id ?? null)
+    if (await dataManagementService.download(backup)) store.notify('数据备份已导出')
+  }
   catch (error) { store.notify(toUserMessage(error, '数据导出失败，请稍后重试')) }
   finally { dataBusy.value = false }
 }

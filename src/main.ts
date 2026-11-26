@@ -22,10 +22,12 @@ import './achievements.css'
 import './themes.css'
 import './pwa.css'
 import './mobile.css'
+import './ios.css'
 
 async function start() {
   const pinia = createPinia()
   const native = Capacitor.isNativePlatform()
+  document.documentElement.toggleAttribute('data-native-ios', Capacitor.getPlatform() === 'ios')
   const session = native ? await readStoredNativeSession() : readStoredWebSession()
   databaseService.selectOwner(session?.user.id ?? null)
   primeTheme()

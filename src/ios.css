@@ -1,0 +1,48 @@
+:root[data-native-ios] {
+  --fd-ios-top: env(safe-area-inset-top, 0px);
+  --fd-ios-bottom: env(safe-area-inset-bottom, 0px);
+  --fd-ios-left: env(safe-area-inset-left, 0px);
+  --fd-ios-right: env(safe-area-inset-right, 0px);
+  overscroll-behavior-y: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+[data-native-ios][data-keyboard-open] { --fd-ios-bottom: 0px; }
+[data-native-ios] :is(.drawer-body, .mobile-create-fields, .habit-drawer, .habit-form) {
+  overscroll-behavior: contain;
+}
+
+[data-native-ios] :is(input:not([type="range"], [type="checkbox"], [type="radio"]), textarea, select) { font-size: 16px; }
+[data-native-ios] .mobile-create-sheet {
+  top: var(--fd-ios-viewport-top, 0px);
+  padding-inline: var(--fd-ios-left) var(--fd-ios-right);
+}
+[data-native-ios] .mobile-create-sheet footer {
+  padding-bottom: max(11px, var(--fd-ios-bottom));
+}
+[data-native-ios][data-mobile-layout] .task-drawer {
+  margin-top: var(--fd-ios-viewport-top, 0px);
+  border-left: solid var(--fd-ios-left) var(--card);
+  border-right: solid var(--fd-ios-right) var(--card);
+}
+[data-native-ios][data-mobile-layout] .task-drawer > footer {
+  padding-bottom: max(10px, var(--fd-ios-bottom));
+}
+[data-native-ios] .habit-form {
+  max-height: calc(var(--fd-mobile-height, 100dvh) - max(12px, var(--fd-ios-top)) - max(12px, var(--fd-ios-bottom)));
+  inset-block: calc(var(--fd-ios-viewport-top, 0px) + max(12px, var(--fd-ios-top))) auto;
+}
+[data-native-ios] .habit-drawer {
+  max-height: var(--fd-mobile-height, 100dvh);
+  top: var(--fd-ios-viewport-top, 0px);
+  padding: var(--fd-ios-top) var(--fd-ios-right) var(--fd-ios-bottom) var(--fd-ios-left);
+}
+[data-native-ios]:not([data-mobile-layout]) .app-shell {
+  padding: var(--fd-ios-top) var(--fd-ios-right) var(--fd-ios-bottom) var(--fd-ios-left);
+}
+[data-native-ios]:not([data-mobile-layout]) :is(.main-stage, .sidebar, .right-panel) {
+  max-height: calc(100dvh - var(--fd-ios-top) - var(--fd-ios-bottom));
+}
+[data-native-ios]:not([data-mobile-layout]) .focus-page.fullscreen {
+  padding: max(60px, var(--fd-ios-top)) max(24px, var(--fd-ios-right)) max(24px, var(--fd-ios-bottom)) max(24px, var(--fd-ios-left));
+}

@@ -4,6 +4,8 @@ FocusDay 项目仓库。
 
 [Android 工程、构建与认证回调配置](docs/android.md)
 
+[iOS 兼容、构建与验收说明](docs/ios.md)
+
 ## 本地数据库与账号
 
 Web 通过 IndexedDB 持久化，Capacitor 原生端通过 SQLite 持久化。两端复用任务、分类、习惯、专注、计时、设置和同步 Repository。业务变更与同步队列在同一事务提交。SQLite 迁移按版本执行，记录 ID、毫秒时间戳、ISO 日期字段、软删除和同步版本沿用原有业务模型。

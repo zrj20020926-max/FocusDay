@@ -8,6 +8,7 @@ export function observeMobileLayout() {
   const media = matchMedia(query)
   const viewport = window.visualViewport
   const root = document.documentElement
+  const ios = root.hasAttribute('data-native-ios')
   const heights = new Map<string, number>()
   let frame = 0
   let scrollFrame = 0
@@ -26,11 +27,13 @@ export function observeMobileLayout() {
     const keyboard = mobile.value && editable && Math.max(innerHeight - height, baseline - height) > 120
     root.toggleAttribute('data-keyboard-open', keyboard)
     root.style.setProperty('--fd-mobile-height', `${Math.round(height)}px`)
+    const top = ios && keyboard ? viewport?.offsetTop ?? 0 : 0
+    if (ios) root.style.setProperty('--fd-ios-viewport-top', `${Math.round(top)}px`)
     if (keyboard && element instanceof HTMLElement) {
       cancelAnimationFrame(scrollFrame)
       scrollFrame = requestAnimationFrame(() => {
         const rect = element.getBoundingClientRect()
-        if (rect.bottom > height - 66) element.scrollIntoView({ block: 'center', behavior: 'instant' })
+        if (rect.top < top || rect.bottom > top + height - 66) element.scrollIntoView({ block: 'center', behavior: 'instant' })
       })
     }
   }
@@ -38,6 +41,7 @@ export function observeMobileLayout() {
   media.addEventListener('change', schedule)
   window.addEventListener('resize', schedule)
   viewport?.addEventListener('resize', schedule)
+  if (ios) viewport?.addEventListener('scroll', schedule)
   document.addEventListener('focusin', schedule)
   document.addEventListener('focusout', schedule)
   update()
@@ -45,6 +49,7 @@ export function observeMobileLayout() {
     media.removeEventListener('change', schedule)
     window.removeEventListener('resize', schedule)
     viewport?.removeEventListener('resize', schedule)
+    if (ios) viewport?.removeEventListener('scroll', schedule)
     document.removeEventListener('focusin', schedule)
     document.removeEventListener('focusout', schedule)
     cancelAnimationFrame(frame)
@@ -52,5 +57,6 @@ export function observeMobileLayout() {
     root.removeAttribute('data-mobile-layout')
     root.removeAttribute('data-keyboard-open')
     root.style.removeProperty('--fd-mobile-height')
+    if (ios) root.style.removeProperty('--fd-ios-viewport-top')
   }
 }

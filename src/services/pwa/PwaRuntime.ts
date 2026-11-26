@@ -28,7 +28,7 @@ const showUpdate = () => {
 export function startPwa(beforeReload: () => Promise<void>) {
   if (cleanup) return cleanup
   const workers = navigator.serviceWorker
-  state.supported = import.meta.env.PROD && import.meta.env.MODE !== 'android'
+  state.supported = import.meta.env.PROD && !['android', 'ios'].includes(import.meta.env.MODE)
     && !Capacitor.isNativePlatform() && Boolean(workers) && window.isSecureContext
   state.online = navigator.onLine
   if (!state.supported) return () => undefined

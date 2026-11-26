@@ -1,4 +1,5 @@
 import type { CategoryRecord, FocusSessionRecord, HabitEntityRecord, HabitRecordEntity, TaskRecord, UserSettingsRecord } from '../../types/database'
+import { Capacitor } from '@capacitor/core'
 import { HABIT_FREQUENCIES, HABIT_GOAL_TYPES, type HabitRecord } from '../../types/habit'
 import { DataManagementError, USER_DATA_FORMAT, USER_DATA_SCHEMA_VERSION, type ImportSummary, type UserDataBackup } from '../../types/dataManagement'
 import { TASK_PRIORITIES, TASK_STATUSES } from '../../types/task'
@@ -57,14 +58,21 @@ export class DataManagementService {
     }
   }
 
-  download(backup: UserDataBackup): void {
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' })
+  async download(backup: UserDataBackup): Promise<boolean> {
+    const json = JSON.stringify(backup, null, 2)
+    const filename = `focus-day-backup-${backup.exportedAt.slice(0, 10)}.json`
+    if (Capacitor.getPlatform() === 'ios') {
+      const { shareIOSBackup } = await import('../platform/iosBackup')
+      return shareIOSBackup(filename, json)
+    }
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `focus-day-backup-${backup.exportedAt.slice(0, 10)}.json`
+    anchor.download = filename
     anchor.click()
     URL.revokeObjectURL(url)
+    return true
   }
 
   parse(text: string): UserDataBackup {

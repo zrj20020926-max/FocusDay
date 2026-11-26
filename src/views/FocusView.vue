@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Minimize2 } from 'lucide-vue-next'
 import { useOnline } from '@vueuse/core'
+import { Capacitor } from '@capacitor/core'
 import AmbientMixer from '../components/focus/AmbientMixer.vue'
 import FocusScene from '../components/focus/FocusScene.vue'
 import ImmersiveTimer from '../components/focus/ImmersiveTimer.vue'
@@ -52,7 +53,7 @@ async function enterFullscreen() {
     await fullscreenService.enter(focusRoot.value)
     store.focusFullscreen = true; ambient.setFullscreenPreferred(true)
   } catch (error) {
-    if (isMobileLayout.value && error instanceof FullscreenError) {
+    if ((isMobileLayout.value || Capacitor.getPlatform() === 'ios') && error instanceof FullscreenError) {
       store.focusFullscreen = true
       ambient.setFullscreenPreferred(true)
       return

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { Check, ChevronRight, GripVertical, Play, RotateCcw, X } from 'lucide-vue-next'
+import { Capacitor } from '@capacitor/core'
 import { useAppStore } from '../../stores/app'
 import { formatTaskDate, useTaskStore } from '../../stores/taskStore'
 import { useTaskFocus } from '../../composables/useTaskFocus'
+import { isIOSEdgeBackStart } from '../../services/platform/iosEdgeBack'
 import type { Task } from '../../types/task'
 
 const props = withDefaults(defineProps<{ tasks: Task[]; reorderable?: boolean }>(), { reorderable: true })
@@ -26,6 +28,7 @@ let preventTapUntil = 0
 
 function slide(event: PointerEvent, task: Task) {
   if (event.pointerType === 'mouse' || !event.isPrimary || (event.target as Element).closest('button')) return
+  if (Capacitor.getPlatform() === 'ios' && isIOSEdgeBackStart(event.clientX)) return
   swipe = { pointer: event.pointerId, id: task.id, startX: event.clientX, startY: event.clientY, started: false, cancelled: false }
 }
 
