@@ -180,10 +180,10 @@ export class StatisticsService {
   private readSnapshot(): Promise<{ taskRecords: TaskRecord[]; categoryRecords: CategoryRecord[]; sessionRecords: FocusSessionRecord[] }> {
     if (this.snapshot?.revision === this.revision) return this.snapshot.promise
     const snapshotRevision = this.revision
-    const loading = this.database.db.transaction('r', [this.database.db.tasks, this.database.db.categories, this.database.db.focusSessions], async () => ({
-      taskRecords: await this.database.db.tasks.toArray(),
-      categoryRecords: await this.database.db.categories.toArray(),
-      sessionRecords: await this.database.db.focusSessions.toArray(),
+    const loading = this.database.read(['tasks', 'categories', 'focusSessions'], async db => ({
+      taskRecords: await db.tasks.toArray(),
+      categoryRecords: await db.categories.toArray(),
+      sessionRecords: await db.focusSessions.toArray(),
     }))
     const promise = loading.catch(error => { if (this.snapshot?.revision === snapshotRevision) this.snapshot = null; throw error })
     this.snapshot = { revision: this.revision, promise }

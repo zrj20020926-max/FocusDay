@@ -86,6 +86,7 @@ function switchMode(next: Mode) {
           <p class="auth-card-copy">{{subtitle}}</p>
 
           <div v-if="!auth.configured" class="auth-config-note">云端服务尚未配置。填写环境变量后即可启用登录；本地模式不受影响。</div>
+          <p v-else-if="mode !== 'update-password'" class="auth-card-copy">访客数据保留在此设备的本地模式。登录后将打开当前账号的数据空间。</p>
 
           <div v-if="mode==='login' || mode==='register'" class="auth-tabs">
             <button :class="{active:mode==='login'}" @click="switchMode('login')">登录</button>

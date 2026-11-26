@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { liveQuery } from 'dexie'
+import { databaseService } from '../services/database/DatabaseService'
 import { HabitService } from '../services/habit/HabitService'
 import { HabitRepository } from '../services/database/repositories/HabitRepository'
 import { HabitRecordRepository } from '../services/database/repositories/HabitRecordRepository'
@@ -57,7 +57,7 @@ export const useHabitStore = defineStore('habits', {
       await this.initialize()
       if (observer) return
       this.updateDate()
-      observer = liveQuery(() => focusRepository.listForHabits()).subscribe({
+      observer = databaseService.observe(['focusSessions'], () => focusRepository.listForHabits()).subscribe({
         next: sessions => { service.recalculateFromFocusSessions(sessions, this.timeZone); this.sync() },
         error: () => { this.stopObserving(); useAppStore().notify('暂时无法更新习惯的专注进度') },
       })

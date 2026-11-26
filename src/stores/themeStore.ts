@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { liveQuery } from 'dexie'
+import { Capacitor } from '@capacitor/core'
+import { databaseService } from '../services/database/DatabaseService'
 import { SettingsRepository } from '../services/database/repositories/SettingsRepository'
 import { ThemeService, THEME_KEY, themePreference, type ThemeId, type ThemePreference } from '../services/theme/ThemeService'
 
@@ -10,8 +11,16 @@ let stop: (() => void) | undefined
 
 function browserTheme() {
   if (!service) {
-    let cache: Storage | undefined
-    try { cache = window.localStorage } catch { /* Optional startup cache. */ }
+    let cache: Pick<Storage, 'getItem' | 'setItem'> | undefined
+    try {
+      if (!Capacitor.isNativePlatform()) {
+        const prefix = databaseService.owner ?? 'guest'
+        cache = {
+          getItem: key => window.localStorage.getItem(prefix + ':' + key),
+          setItem: (key, value) => window.localStorage.setItem(prefix + ':' + key, value),
+        }
+      }
+    } catch { /* Optional startup cache. */ }
     service = new ThemeService(document.documentElement, () => darkMode().matches,
       () => window.matchMedia('(prefers-reduced-motion: reduce)').matches, cache)
   }
@@ -32,7 +41,7 @@ export const useThemeStore = defineStore('theme', {
       const media = darkMode()
       const systemChanged = () => { if (this.preference === 'system') this.apply('system') }
       media.addEventListener('change', systemChanged)
-      const subscription = liveQuery(() => repository.get(THEME_KEY)).subscribe({
+      const subscription = databaseService.observe(['userSettings'], () => repository.get(THEME_KEY)).subscribe({
         next: value => { this.apply(themePreference(value), this.ready); this.ready = true },
         error: () => { this.error = '无法载入主题偏好。' },
       })

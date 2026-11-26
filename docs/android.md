@@ -20,6 +20,17 @@ Android 工程位于 `android/`。应用名为 Focus Day，应用 ID 为 `com.fo
 - Vue Router 保持 history 模式。Capacitor 会在应用内提供页面入口，Android 返回键先关闭当前浮层，再返回上一路由。在没有可返回页面时回到首页或最小化。
 - Android 使用与浏览器分开的本地存储。原 Web 版的数据需要通过账号同步或 JSON 导入进入 Android。
 
+## SQLite 与同步验收
+
+原生 SQLite 使用 Capacitor Community SQLite 7.0.3。数据库版本由 `sqliteSchema.ts` 管理，先建表与索引，再按版本补充统计索引和唯一约束。应用升级时，同一安装中的旧 WebView IndexedDB 会按已绑定的账号迁入 SQLite；未绑定数据归入访客。原生认证使用 Secure Storage 7.1.3，SQLite 业务数据当前未启用数据库加密。
+
+在隔离的 Android 模拟器上，可用模拟 Supabase 验证两账号切换、离线编辑重连、远端拉取、软删除和计时恢复。
+
+1. 在另一终端运行 `node scripts/pwa-test-server.mjs --native`。
+2. 临时设置 `VITE_SUPABASE_URL=https://focusday-fixture.test` 和 `VITE_SUPABASE_PUBLISHABLE_KEY=local-native-test-fixture`，运行 Android 同步与 Debug 构建并安装 APK。
+3. 使用 `ANDROID_SERIAL` 和 `ADB_PATH` 指定该模拟器，运行 `node scripts/verify-android.mjs --sqlite-sync`。脚本把 WebView 的模拟请求转到本机测试服务器。
+4. 清除临时环境变量，重新构建日常使用的 APK。
+
 ## Supabase 和邮件链接
 
 `.env.local` 中的两个公开变量会用于两个构建，Android 可以用被 Git 忽略的 `.env.android.local` 覆盖。Android 的 Supabase URL 使用 HTTPS，仅允许 Publishable Key 或旧版 anon key。Secret、Service Role Key、SDK 私有路径、签名文件和生成的 Web assets 都应留在本机。

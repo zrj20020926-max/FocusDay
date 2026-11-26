@@ -4,6 +4,14 @@ FocusDay 项目仓库。
 
 [Android 工程、构建与认证回调配置](docs/android.md)
 
+## 本地数据库与账号
+
+Web 通过 IndexedDB 持久化，Capacitor 原生端通过 SQLite 持久化。两端复用任务、分类、习惯、专注、计时、设置和同步 Repository。业务变更与同步队列在同一事务提交。SQLite 迁移按版本执行，记录 ID、毫秒时间戳、ISO 日期字段、软删除和同步版本沿用原有业务模型。
+
+访客和每个登录账号使用独立的数据空间。首次升级时，旧 IndexedDB 根据已有账号绑定进行一次迁移，停留在旧本地模式的数据归入访客空间。原有数据库保留，迁移成功后由目标库中的标记防止重复导入。登录和退出会重新打开对应空间，访客写入保留在本机。
+
+Android 登录令牌使用系统 Keystore 支持的安全存储，iOS 实现使用设备本地 Keychain。业务 SQLite 当前使用应用私有目录中的未加密数据库。可用 `npm test` 验证两个后端的同步及迁移逻辑，并通过 [Android 验收说明](docs/android.md) 复跑模拟器检查。
+
 ## 安装与离线
 
 使用 Node.js 20.19+ 运行 `npm run build`，将 `dist/` 部署到 HTTPS 站点的根路径。本地可用 `npm run preview` 验证生产版。静态托管应把应用路由回退到 `index.html`，并让 `sw.js` 重新校验缓存。Service Worker 在生产构建中启用。

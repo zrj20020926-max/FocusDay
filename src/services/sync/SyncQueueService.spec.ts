@@ -27,7 +27,7 @@ describe('SyncQueueService', () => {
   it('同步队列写入失败时业务写入也回滚', async () => {
     const db = createDatabase(); const repository = new IndexedDbTaskRepository(db)
     await repository.saveCategory(category)
-    db.db.syncQueue.hook('creating', () => { throw new Error('queue failed') })
+    db.indexedDb.syncQueue.hook('creating', () => { throw new Error('queue failed') })
     const value = task()
     await expect(repository.saveTask(value)).rejects.toThrow('queue failed')
     expect(await db.db.tasks.get(value.id)).toBeUndefined()

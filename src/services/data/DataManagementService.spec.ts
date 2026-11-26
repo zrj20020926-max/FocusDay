@@ -67,7 +67,7 @@ describe('DataManagementService', () => {
   it('导入失败时回滚全部业务写入和导入标记', async () => {
     const source = await seededService(); const backup = await source.service.createBackup('user-1')
     const target = await createDatabase(); const service = new DataManagementService(target)
-    target.db.syncQueue.hook('creating', () => { throw new Error('queue failure') })
+    target.indexedDb.syncQueue.hook('creating', () => { throw new Error('queue failure') })
     await expect(service.restore(backup, 'user-1')).rejects.toBeInstanceOf(DataManagementError)
     expect(await target.db.tasks.count()).toBe(0)
     expect(await target.db.syncMetadata.get(`import:${backup.backupId}`)).toBeUndefined()

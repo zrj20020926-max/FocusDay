@@ -1,4 +1,8 @@
-import Dexie, { type EntityTable, type Transaction } from 'dexie'
+import Dexie, { liveQuery, type EntityTable, type Transaction } from 'dexie'
+import { Capacitor } from '@capacitor/core'
+import { tableNames, type DatabaseObserver, type DatabaseTables, type Row, type TableName } from './DatabaseTables'
+import { NativeDatabaseService } from './NativeDatabaseService'
+import { ACCOUNT_IMPORT_ID, migrateAccountStorage } from './migrations/accountStorageMigration'
 import type {
   CategoryRecord,
   DatabaseExport,
@@ -119,72 +123,110 @@ export class FocusDayDatabase extends Dexie {
 }
 
 export class DatabaseService {
-  readonly db: FocusDayDatabase
+  readonly indexedDb: FocusDayDatabase
+  private accountDb?: FocusDayDatabase
+  private accountOwner?: string | null
   private initialization: Promise<void> | null = null
 
-  constructor(name = DATABASE_NAME) {
-    this.db = new FocusDayDatabase(name)
+  constructor(name = DATABASE_NAME, private readonly native?: NativeDatabaseService) {
+    this.indexedDb = new FocusDayDatabase(name)
+  }
+
+  private get webDb() { return this.accountDb ?? this.indexedDb }
+  get db(): DatabaseTables { return this.native?.tables ?? this.webDb }
+  get owner() { return this.accountOwner }
+
+  selectOwner(owner: string | null) {
+    if (this.accountOwner !== undefined) {
+      if (owner !== this.accountOwner) throw new Error('切换账号时必须重新加载本地数据空间')
+      return
+    }
+    if (this.initialization) throw new Error('必须在打开数据库之前选择账号')
+    if (owner && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(owner)) throw new Error('本地账号标识无效')
+    if (this.native) this.native.selectOwner(owner)
+    else this.accountDb = new FocusDayDatabase(this.indexedDb.name + (owner ? '-user-' + owner : '-guest'))
+    this.accountOwner = owner
   }
 
   initialize(): Promise<void> {
     if (!this.initialization) {
-      this.initialization = this.db.open().then(() => migrateLocalStorage(this.db)).catch(error => {
+      this.initialization = (this.native ? this.openNative(this.native)
+        : this.webDb.open().then(() => this.openWeb())).catch(error => {
         this.initialization = null
-        throw new Error(`本地数据库初始化失败：${error instanceof Error ? error.message : String(error)}`)
+        throw Object.assign(new Error('本地数据库初始化失败'), { cause: error })
       })
     }
     return this.initialization
   }
 
-  async transaction<T>(callback: () => Promise<T>): Promise<T> {
+  private async openNative(native: NativeDatabaseService) {
+    await native.initialize()
+    await migrateAccountStorage(native.owner ?? null, this.db, this.indexedDb, action => native.transaction(action))
+  }
+
+  private openWeb() {
+    if (this.accountOwner === undefined) return migrateLocalStorage(this.webDb)
+    const scope = this.accountOwner
+    return this.webDb.syncMetadata.get(ACCOUNT_IMPORT_ID).then(async imported => {
+      if (scope === null && !imported && !await Dexie.exists(this.indexedDb.name)) await migrateLocalStorage(this.webDb)
+      await migrateAccountStorage(scope, this.db, this.indexedDb, action =>
+        this.webDb.transaction('rw', tableNames.map(name => this.webDb[name]), async () => await action(this.db)))
+    })
+  }
+
+  async transaction<T>(callback: (tables: DatabaseTables) => Promise<T>): Promise<T> {
     await this.initialize()
-    return this.db.transaction('rw', [this.db.tasks, this.db.categories, this.db.focusSessions, this.db.timerStates,
-      this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts, this.db.habits, this.db.habitRecords], callback)
+    return this.native ? this.native.transaction(callback)
+      : this.webDb.transaction('rw', tableNames.map(name => this.webDb[name]), async () => await callback(this.db))
+  }
+
+  async read<T>(names: TableName[], callback: (tables: DatabaseTables) => Promise<T>): Promise<T> {
+    await this.initialize()
+    return this.native ? this.native.transaction(callback, false)
+      : this.webDb.transaction('r', names.map(name => this.webDb[name]), async () => await callback(this.db))
+  }
+
+  observe<T>(names: TableName[], query: () => Promise<T>) {
+    if (this.native) return this.native.observe(names, query)
+    const observable = liveQuery(query)
+    return { subscribe: (observer: DatabaseObserver<T>) => typeof observer === 'function'
+      ? observable.subscribe(observer) : observable.subscribe(observer) }
   }
 
   async exportData(): Promise<DatabaseExport> {
-    await this.initialize()
-    return this.db.transaction('r', [this.db.tasks, this.db.categories, this.db.focusSessions, this.db.timerStates,
-      this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts, this.db.habits, this.db.habitRecords], async () => ({
+    return this.read([...tableNames], async db => {
+      const entries = await Promise.all(tableNames.map(async name => [name, await db[name].toArray()]))
+      return {
         format: 'focus-day-database',
         schemaVersion: DATABASE_VERSION,
         exportedAt: new Date().toISOString(),
-        data: {
-          tasks: await this.db.tasks.toArray(),
-          categories: await this.db.categories.toArray(),
-          focusSessions: await this.db.focusSessions.toArray(),
-          timerStates: await this.db.timerStates.toArray(),
-          userSettings: await this.db.userSettings.toArray(),
-          syncQueue: await this.db.syncQueue.toArray(),
-          syncMetadata: await this.db.syncMetadata.toArray(),
-          syncConflicts: await this.db.syncConflicts.toArray(),
-          habits: await this.db.habits.toArray(),
-          habitRecords: await this.db.habitRecords.toArray(),
-        },
-      }))
+        data: Object.fromEntries(entries) as DatabaseExport['data'],
+      }
+    })
   }
 
   async restoreData(backup: DatabaseExport): Promise<void> {
     if (backup.format !== 'focus-day-database' || !backup.data) throw new Error('备份文件格式无效')
-    await this.transaction(async () => {
-      const tables = [this.db.tasks, this.db.categories, this.db.focusSessions, this.db.timerStates,
-        this.db.userSettings, this.db.syncQueue, this.db.syncMetadata, this.db.syncConflicts, this.db.habits, this.db.habitRecords]
-      await Promise.all(tables.map(table => table.clear()))
-      await this.db.tasks.bulkPut(backup.data.tasks ?? [])
-      await this.db.categories.bulkPut(backup.data.categories ?? [])
-      await this.db.focusSessions.bulkPut(backup.data.focusSessions ?? [])
-      await this.db.timerStates.bulkPut(backup.data.timerStates ?? [])
-      await this.db.userSettings.bulkPut(backup.data.userSettings ?? [])
-      await this.db.syncQueue.bulkPut(backup.data.syncQueue ?? [])
-      await this.db.syncMetadata.bulkPut(backup.data.syncMetadata ?? [])
-      await this.db.syncConflicts.bulkPut(backup.data.syncConflicts ?? [])
-      await this.db.habits.bulkPut(backup.data.habits ?? [])
-      await this.db.habitRecords.bulkPut(backup.data.habitRecords ?? [])
+    await this.transaction(async db => {
+      const restore = async <K extends TableName>(name: K) => {
+        await db[name].clear()
+        await db[name].bulkPut((backup.data[name] ?? []) as Row<K>[])
+      }
+      for (const name of tableNames) await restore(name)
     })
   }
 
-  close(): void { this.db.close() }
-  async delete(): Promise<void> { this.db.close(); await Dexie.delete(this.db.name) }
+  close(): void { this.webDb.close() }
+  async closeForReload(): Promise<void> {
+    if (this.native) await this.native.closeForReload()
+    else this.close()
+  }
+  async delete(): Promise<void> {
+    if (this.native) throw new Error('SQLite 账户空间必须通过数据清理事务管理')
+    this.close()
+    await Dexie.delete(this.webDb.name)
+  }
 }
 
-export const databaseService = new DatabaseService()
+export const databaseService = new DatabaseService(DATABASE_NAME,
+  Capacitor.isNativePlatform() ? new NativeDatabaseService() : undefined)

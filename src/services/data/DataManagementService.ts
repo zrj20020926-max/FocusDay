@@ -4,6 +4,8 @@ import { DataManagementError, USER_DATA_FORMAT, USER_DATA_SCHEMA_VERSION, type I
 import { TASK_PRIORITIES, TASK_STATUSES } from '../../types/task'
 import { TIMER_MODES } from '../../types/timer'
 import { DatabaseService, databaseService } from '../database/DatabaseService'
+import type { DatabaseTables } from '../database/DatabaseTables'
+import { ACCOUNT_IMPORT_ID } from '../database/migrations/accountStorageMigration'
 import { SyncQueueService } from '../sync/SyncQueueService'
 import { isAchievementKey, readAchievement } from '../../types/achievement'
 import { AchievementRepository } from '../database/repositories/AchievementRepository'
@@ -135,33 +137,33 @@ export class DataManagementService {
     await this.assertBoundOwner(currentOwnerId)
     if (await this.database.db.syncMetadata.get(`import:${backup.backupId}`)) throw new DataManagementError('这个备份已经导入过，无需重复恢复', 'DUPLICATE_BACKUP')
     try {
-      await this.database.transaction(async () => {
+      await this.database.transaction(async db => {
         const nowIso = new Date().toISOString()
         const nowMs = Date.now()
         const [oldTasks, oldCategories, oldSessions, oldSettings] = await Promise.all([
-          this.database.db.tasks.toArray(), this.database.db.categories.toArray(), this.database.db.focusSessions.toArray(), this.database.db.userSettings.toArray(),
+          db.tasks.toArray(), db.categories.toArray(), db.focusSessions.toArray(), db.userSettings.toArray(),
         ])
         const taskMap = new Map(oldTasks.map(item => [item.id, item]))
         const categoryMap = new Map(oldCategories.map(item => [item.id, item]))
         const sessionMap = new Map(oldSessions.map(item => [item.id, item]))
         const settingMap = new Map(oldSettings.map(item => [item.id, item]))
-        await this.restoreCollection('CATEGORY', oldCategories, backup.data.categories, item => item.id, async item => {
+        await this.restoreCollection(db, 'CATEGORY', oldCategories, backup.data.categories, item => item.id, async item => {
           const old = categoryMap.get(item.id); const record: CategoryRecord = { ...structuredClone(item), deletedAt: null, syncStatus: 'PENDING', version: (old?.version ?? 0) + 1 }
-          await this.database.db.categories.put(record); return record
+          await db.categories.put(record); return record
         }, nowIso)
-        await this.restoreCollection('TASK', oldTasks, backup.data.tasks, item => item.id, async item => {
+        await this.restoreCollection(db, 'TASK', oldTasks, backup.data.tasks, item => item.id, async item => {
           const old = taskMap.get(item.id); const record: TaskRecord = { ...structuredClone(item), deletedAt: null, syncStatus: 'PENDING', version: (old?.version ?? 0) + 1 }
-          await this.database.db.tasks.put(record); return record
+          await db.tasks.put(record); return record
         }, nowIso)
         if (backup.schemaVersion === USER_DATA_SCHEMA_VERSION) {
-          const oldHabits = await this.database.db.habits.toArray()
-          const oldHabitRecords = await this.database.db.habitRecords.toArray()
+          const oldHabits = await db.habits.toArray()
+          const oldHabitRecords = await db.habitRecords.toArray()
           const habitById = new Map(oldHabits.map(item => [item.id, item]))
           const recordByDate = new Map(oldHabitRecords.map(item => [habitDateKey(item), item]))
           const recordById = new Map(oldHabitRecords.map(item => [item.id, item]))
-          await this.restoreCollection('HABIT', oldHabits, backup.data.habits, item => item.id, async item => {
+          await this.restoreCollection(db, 'HABIT', oldHabits, backup.data.habits, item => item.id, async item => {
             const record: HabitEntityRecord = { ...item, updatedAt: nowIso, syncStatus: 'PENDING', version: (habitById.get(item.id)?.version ?? 0) + 1 }
-            await this.database.db.habits.put(record)
+            await db.habits.put(record)
             return record
           }, nowIso)
           const records = backup.data.habitRecords.map(item => {
@@ -169,28 +171,28 @@ export class DataManagementService {
             const id = existing?.id ?? (recordById.has(item.id) ? crypto.randomUUID() : item.id)
             return { ...item, id }
           })
-          await this.restoreCollection('HABIT_RECORD', oldHabitRecords, records, item => item.id, async item => {
+          await this.restoreCollection(db, 'HABIT_RECORD', oldHabitRecords, records, item => item.id, async item => {
             const record: HabitRecordEntity = { ...item, updatedAt: nowIso, syncStatus: 'PENDING', version: (recordById.get(item.id)?.version ?? 0) + 1 }
-            await this.database.db.habitRecords.put(record)
+            await db.habitRecords.put(record)
             return record
           }, nowIso)
         }
-        await this.restoreCollection('FOCUS_SESSION', oldSessions, backup.data.focusSessions, item => item.id, async item => {
+        await this.restoreCollection(db, 'FOCUS_SESSION', oldSessions, backup.data.focusSessions, item => item.id, async item => {
           const old = sessionMap.get(item.id); const record: FocusSessionRecord = { ...structuredClone(item), updatedAt: nowMs, deletedAt: null, syncStatus: 'PENDING', version: (old?.version ?? 0) + 1 }
-          await this.database.db.focusSessions.put(record); return record
+          await db.focusSessions.put(record); return record
         }, nowIso)
-        await this.restoreCollection('USER_SETTING', oldSettings.filter(item => !isAchievementKey(item.id)),
+        await this.restoreCollection(db, 'USER_SETTING', oldSettings.filter(item => !isAchievementKey(item.id)),
           backup.data.userSettings.filter(item => !isAchievementKey(item.key)), item => item.key, async item => {
           const old = settingMap.get(item.key); const record: UserSettingsRecord = { id: item.key, value: structuredClone(item.value), createdAt: old?.createdAt ?? nowIso,
             updatedAt: nowIso, deletedAt: null, syncStatus: 'PENDING', version: (old?.version ?? 0) + 1 }
-          await this.database.db.userSettings.put(record); return record
+          await db.userSettings.put(record); return record
         }, nowIso)
         const achievements = new AchievementRepository(this.database)
         for (const setting of backup.data.userSettings) {
           const record = readAchievement(setting.key, setting.value)
-          if (record) await achievements.unlock(record)
+          if (record) await achievements.unlock(record, db)
         }
-        await this.database.db.syncMetadata.put({ id: `import:${backup.backupId}`, lastSyncedAt: null, cursor: null,
+        await db.syncMetadata.put({ id: `import:${backup.backupId}`, lastSyncedAt: null, cursor: null,
           value: { importedAt: nowIso, exportedAt: backup.exportedAt }, createdAt: nowIso, updatedAt: nowIso,
           deletedAt: null, syncStatus: 'LOCAL', version: 1 })
       })
@@ -206,39 +208,44 @@ export class DataManagementService {
 
   async clearLocalData(): Promise<void> {
     try {
-      await this.database.transaction(async () => {
-        await Promise.all([this.database.db.tasks.clear(), this.database.db.categories.clear(), this.database.db.focusSessions.clear(),
-          this.database.db.timerStates.clear(), this.database.db.userSettings.clear(), this.database.db.syncQueue.clear(),
-          this.database.db.syncMetadata.clear(), this.database.db.syncConflicts.clear(), this.database.db.habits.clear(), this.database.db.habitRecords.clear()])
+      await this.database.transaction(async db => {
+        const accountImport = await db.syncMetadata.get(ACCOUNT_IMPORT_ID)
+        await Promise.all([db.tasks.clear(), db.categories.clear(), db.focusSessions.clear(),
+          db.timerStates.clear(), db.userSettings.clear(), db.syncQueue.clear(),
+          db.syncMetadata.clear(), db.syncConflicts.clear(), db.habits.clear(), db.habitRecords.clear()])
+        if (accountImport) await db.syncMetadata.put(accountImport)
         const now = new Date().toISOString()
-        await this.database.db.syncMetadata.put({ id: LEGACY_MIGRATION_ID, lastSyncedAt: null, cursor: null, value: { clearedAt: now },
+        await db.syncMetadata.put({ id: LEGACY_MIGRATION_ID, lastSyncedAt: null, cursor: null, value: { clearedAt: now },
           createdAt: now, updatedAt: now, deletedAt: null, syncStatus: 'LOCAL', version: 1 })
       })
     } catch { throw new DataManagementError('本地数据清理失败，原有数据已保留', 'DATABASE_ERROR') }
   }
 
-  private async restoreCollection<TLocal extends { id: string; version: number; updatedAt: any; deletedAt: any }, TImport>(entityType: any,
+  private async restoreCollection<TLocal extends { id: string; version: number; updatedAt: any; deletedAt: any }, TImport>(db: DatabaseTables, entityType: any,
     existing: TLocal[], imported: TImport[], idOf: (item: TImport) => string, save: (item: TImport) => Promise<any>, nowIso: string): Promise<void> {
     const importedIds = new Set(imported.map(idOf))
     for (const old of existing.filter(item => !item.deletedAt && !importedIds.has(item.id))) {
       const deletedAt = typeof old.updatedAt === 'number' ? Date.now() : nowIso
       const record = { ...old, deletedAt, updatedAt: deletedAt, syncStatus: 'PENDING' as const, version: old.version + 1 }
-      const table = entityType === 'CATEGORY' ? this.database.db.categories : entityType === 'TASK' ? this.database.db.tasks
-        : entityType === 'FOCUS_SESSION' ? this.database.db.focusSessions : entityType === 'HABIT' ? this.database.db.habits
-          : entityType === 'HABIT_RECORD' ? this.database.db.habitRecords : this.database.db.userSettings
+      const table = entityType === 'CATEGORY' ? db.categories : entityType === 'TASK' ? db.tasks
+        : entityType === 'FOCUS_SESSION' ? db.focusSessions : entityType === 'HABIT' ? db.habits
+          : entityType === 'HABIT_RECORD' ? db.habitRecords : db.userSettings
       await table.put(record as any)
-      await this.queue.enqueueWithinTransaction({ entityType, entityId: old.id, operation: 'DELETE', payload: record,
+      await this.queue.enqueueWithinTransaction(db, { entityType, entityId: old.id, operation: 'DELETE', payload: record,
         baseVersion: old.version, baseUpdatedAt: typeof old.updatedAt === 'number' ? new Date(old.updatedAt).toISOString() : old.updatedAt })
     }
     const oldMap = new Map(existing.map(item => [item.id, item]))
     for (const item of imported) {
       const id = idOf(item); const old = oldMap.get(id); const record = await save(item)
-      await this.queue.enqueueWithinTransaction({ entityType, entityId: id, operation: old ? 'UPDATE' : 'INSERT', payload: record,
+      await this.queue.enqueueWithinTransaction(db, { entityType, entityId: id, operation: old ? 'UPDATE' : 'INSERT', payload: record,
         baseVersion: old?.version ?? 0, baseUpdatedAt: old ? (typeof old.updatedAt === 'number' ? new Date(old.updatedAt).toISOString() : old.updatedAt) : null })
     }
   }
 
   private async assertBoundOwner(ownerId: string | null): Promise<void> {
+    if (this.database.owner !== undefined && this.database.owner !== ownerId) {
+      throw new DataManagementError('备份账号与当前本地数据空间不一致', 'OWNER_MISMATCH')
+    }
     const bound = (await this.database.db.syncMetadata.get('sync:bound-user'))?.value as { userId?: string } | undefined
     if (bound?.userId && bound.userId !== ownerId) throw new DataManagementError('请登录此设备关联的账号后管理备份', 'OWNER_MISMATCH')
   }

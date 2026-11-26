@@ -25,6 +25,7 @@ import { startNotifications } from './services/notification/notificationRuntime'
 import { pwa, startPwa } from './services/pwa/PwaRuntime'
 import { databaseService } from './services/database/DatabaseService'
 import { AUTH_STORAGE_KEY } from './services/supabase/client'
+import { readStoredWebSession } from './services/supabase/NativeAuthStorage'
 import { Capacitor } from '@capacitor/core'
 import { startNativeNavigation } from './services/platform/NativeNavigation'
 import { applyNativeStatusBar } from './services/platform/NativeStatusBar'
@@ -60,9 +61,12 @@ const stopStatusBar = watch(() => [themeStore.applied, store.focusFullscreen], s
 const stopSyncWatch = watch(() => authStore.isAuthenticated, authenticated => {
   if (authenticated) void syncScheduler.start().catch(() => undefined)
   else syncScheduler.stop()
-})
+}, { immediate: true })
 function onAuthStorage(event: StorageEvent) {
-  if (event.key === AUTH_STORAGE_KEY) void authStore.initialize(true)
+  if (!Capacitor.isNativePlatform() && event.key === AUTH_STORAGE_KEY) {
+    authStore.applySession(readStoredWebSession())
+    void authStore.initialize(true)
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -106,7 +110,7 @@ onMounted(() => {
   if (Capacitor.isNativePlatform()) {
     void startNativeNavigation({
       router, dismissOverlay: dismissNativeOverlay,
-      exchangeAuthCode: code => authStore.exchangeNativeAuthCode(code),
+      exchangeAuthCode: (code, recoverPassword) => authStore.exchangeNativeAuthCode(code, recoverPassword),
       authFailed: () => store.notify('认证链接无法打开，请在此设备重新申请。'),
     }).then(dispose => { if (leaving) dispose(); else stopNative = dispose })
       .catch(() => store.notify('原生导航桥接暂不可用。'))

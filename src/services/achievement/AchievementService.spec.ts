@@ -69,7 +69,7 @@ describe('AchievementService', () => {
     expect(stored).toHaveLength(1)
     expect(await database.db.syncQueue.where('entityType').equals('USER_SETTING').count()).toBe(1)
     await focus.softDelete('focus')
-    const next = new DatabaseService(database.db.name)
+    const next = new DatabaseService(database.indexedDb.name)
     try {
       const reopened = new AchievementRepository(next)
       const snapshot = await reopened.snapshot()

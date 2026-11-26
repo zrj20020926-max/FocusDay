@@ -13,7 +13,8 @@ async function quickTask(page: Page, title: string) {
 
 async function queuedTask(page: Page, title: string) {
   return page.evaluate(name => new Promise<{ status: string; lastError?: string; nextAttemptAt?: string } | null>((resolve, reject) => {
-    const request = indexedDB.open('focus-day')
+    const session = JSON.parse(localStorage.getItem('focus-day.auth') ?? 'null')
+    const request = indexedDB.open(session?.user?.id ? 'focus-day-user-' + session.user.id : 'focus-day-guest')
     request.onerror = () => reject(request.error)
     request.onsuccess = () => {
       const database = request.result

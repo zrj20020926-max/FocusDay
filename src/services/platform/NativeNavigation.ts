@@ -4,9 +4,11 @@ import { parseNativeAuthUrl } from './nativeAuth'
 interface NativeNavigationOptions {
   router: Router
   dismissOverlay(): boolean
-  exchangeAuthCode(code: string): Promise<boolean>
+  exchangeAuthCode(code: string, recoverPassword: boolean): Promise<boolean>
   authFailed(): void
 }
+
+const LAUNCH_HANDLED_KEY = 'focus-day.native-launch-handled'
 
 export async function startNativeNavigation({ router, dismissOverlay, exchangeAuthCode, authFailed }: NativeNavigationOptions) {
   const { App } = await import('@capacitor/app')
@@ -24,7 +26,7 @@ export async function startNativeNavigation({ router, dismissOverlay, exchangeAu
     if (handled.has(callback.code)) return
     handled.add(callback.code)
     if (handled.size > 8) handled.delete(handled.values().next().value!)
-    const exchanged = await exchangeAuthCode(callback.code)
+    const exchanged = await exchangeAuthCode(callback.code, callback.recoverPassword)
     if (!active) return
     if (!exchanged) authFailed()
     await router.replace({
@@ -41,7 +43,12 @@ export async function startNativeNavigation({ router, dismissOverlay, exchangeAu
       else if (router.currentRoute.value.name !== 'today') void router.replace({ name: 'today' })
       else void App.minimizeApp()
     })
-    void App.getLaunchUrl().then(launch => { if (launch) return openUrl(launch.url) }).catch(authFailed)
+    void App.getLaunchUrl().then(launch => {
+      // The activity retains its launch intent when only the WebView reloads.
+      if (!active || sessionStorage.getItem(LAUNCH_HANDLED_KEY)) return
+      sessionStorage.setItem(LAUNCH_HANDLED_KEY, '1')
+      if (launch) return openUrl(launch.url)
+    }).catch(authFailed)
     return () => {
       active = false
       void urlListener.remove()

@@ -14,13 +14,13 @@ export class SyncConflictResolver {
   }
 
   async record(entityType: SyncEntityType, entityId: string, localPayload: unknown, remotePayload: unknown,
-    winner: 'LOCAL' | 'REMOTE', reason: SyncConflictRecord['reason']): Promise<SyncConflictRecord> {
+    winner: 'LOCAL' | 'REMOTE', reason: SyncConflictRecord['reason'], db = this.database.db): Promise<SyncConflictRecord> {
     const now = new Date().toISOString()
     const conflict: SyncConflictRecord = {
       id: crypto.randomUUID(), entityType, entityId, localPayload: structuredClone(localPayload),
       remotePayload: structuredClone(remotePayload), winner, reason, resolvedAt: now, createdAt: now, deletedAt: null,
     }
-    await this.database.db.syncConflicts.put(conflict)
+    await db.syncConflicts.put(conflict)
     return conflict
   }
 }

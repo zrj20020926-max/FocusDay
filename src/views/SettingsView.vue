@@ -89,9 +89,9 @@ async function importData(event: Event) {
   } finally { dataBusy.value = false }
 }
 async function logout(clearLocal: boolean) {
-  if (clearLocal && !window.confirm('退出登录并清理此设备上的所有 Focus Day 数据？此操作无法撤销。')) return
-  if (!await authStore.signOut()) { store.notify(authStore.error || '退出登录失败'); return }
-  if (clearLocal) { await dataManagementService.clearLocalData(); window.location.reload(); return }
+  if (clearLocal && !window.confirm('退出登录并清理当前账号在此设备上的数据？此操作无法撤销。')) return
+  if (!await authStore.signOut(clearLocal)) { store.notify(authStore.error || '退出登录失败'); return }
+  if (clearLocal) return
   store.notify('已退出登录，本地数据仍保留在此设备')
 }
 async function clearLocalData() {
@@ -104,8 +104,6 @@ async function deleteAccount() {
   dataBusy.value = true
   try {
     if (!await authStore.deleteAccount()) { store.notify(authStore.error || '账号删除失败'); return }
-    await dataManagementService.clearLocalData()
-    window.location.reload()
   } catch (error) { store.notify(toUserMessage(error, '账号删除失败，请稍后重试')) }
   finally { dataBusy.value = false }
 }

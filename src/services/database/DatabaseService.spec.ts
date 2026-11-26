@@ -130,7 +130,7 @@ describe('IndexedDB repositories', () => {
     databases.push(database)
     await database.initialize()
     const upgraded = await database.db.tasks.get('task-1')
-    expect(database.db.verno).toBe(DATABASE_VERSION)
+    expect(database.indexedDb.verno).toBe(DATABASE_VERSION)
     expect(upgraded).toMatchObject({ syncStatus: 'LOCAL', version: 1, deletedAt: null })
   })
 
@@ -151,9 +151,36 @@ describe('IndexedDB repositories', () => {
     expect((await first.findTaskById('legacy-task'))?.title).toBe('任务 legacy-task')
     database.close()
     databases.splice(databases.indexOf(database), 1)
-    const reopened = new DatabaseService(database.db.name)
+    const reopened = new DatabaseService(database.indexedDb.name)
     databases.push(reopened)
     const second = new IndexedDbTaskRepository(reopened)
     expect(await second.findTaskById('legacy-task')).not.toBeNull()
+  })
+
+  it('Web 保留 IndexedDB，并按游客与登录账号隔离旧数据和新写入', async () => {
+    const name = 'scope-' + crypto.randomUUID()
+    const ownerA = '00000000-0000-4000-8000-000000000001'
+    const ownerB = '00000000-0000-4000-8000-000000000002'
+    const legacy = new DatabaseService(name)
+    databases.push(legacy)
+    await new IndexedDbTaskRepository(legacy).saveTask(task('bound-task'))
+    const time = new Date().toISOString()
+    await legacy.db.syncMetadata.put({ id: 'sync:bound-user', value: { userId: ownerA }, cursor: null, lastSyncedAt: null,
+      syncStatus: 'LOCAL', version: 1, deletedAt: null, createdAt: time, updatedAt: time })
+    legacy.close()
+    const scopedRepository = (owner: string | null) => {
+      const scope = new DatabaseService(name)
+      scope.selectOwner(owner)
+      databases.push(scope)
+      return new IndexedDbTaskRepository(scope)
+    }
+    const visitor = scopedRepository(null)
+    const userB = scopedRepository(ownerB)
+    expect(await visitor.findTaskById('bound-task')).toBeNull()
+    expect(await userB.findTaskById('bound-task')).toBeNull()
+    const userA = scopedRepository(ownerA)
+    expect(await userA.findTaskById('bound-task')).not.toBeNull()
+    await userB.saveTask(task('b-new'))
+    expect(await userA.findTaskById('b-new')).toBeNull()
   })
 })

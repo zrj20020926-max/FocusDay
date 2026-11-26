@@ -1,6 +1,7 @@
 import type { SyncQueueRecord } from '../../types/database'
 import type { SyncEntityType, SyncOperation } from '../../types/sync'
 import { DatabaseService, databaseService } from '../database/DatabaseService'
+import type { DatabaseTables } from '../database/DatabaseTables'
 
 const queueEvents = new EventTarget()
 
@@ -26,14 +27,14 @@ export class SyncQueueService {
 
   async enqueue(input: EnqueueInput): Promise<SyncQueueRecord> {
     await this.database.initialize()
-    const record = await this.database.transaction(() => this.enqueueWithinTransaction(input))
+    const record = await this.database.transaction(db => this.enqueueWithinTransaction(db, input))
     queueEvents.dispatchEvent(new Event('change'))
     return record
   }
 
-  async enqueueWithinTransaction(input: EnqueueInput): Promise<SyncQueueRecord> {
+  async enqueueWithinTransaction(db: DatabaseTables, input: EnqueueInput): Promise<SyncQueueRecord> {
     const now = new Date().toISOString()
-    const existing = (await this.database.db.syncQueue.where('[entityType+entityId]')
+    const existing = (await db.syncQueue.where('[entityType+entityId]')
       .equals([input.entityType, input.entityId]).toArray())
       .filter(item => !item.deletedAt && item.status !== 'CONFLICT')
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
@@ -44,7 +45,7 @@ export class SyncQueueService {
         updatedAt: now, status: 'PENDING', retryCount: 0, nextAttemptAt: null, lastError: null,
         version: existing.version + 1,
       }
-      await this.database.db.syncQueue.put(merged)
+      await db.syncQueue.put(merged)
       queueEvents.dispatchEvent(new Event('change'))
       return structuredClone(merged)
     }
@@ -54,7 +55,7 @@ export class SyncQueueService {
       createdAt: now, updatedAt: now, retryCount: 0, nextAttemptAt: null, status: 'PENDING', lastError: null,
       deletedAt: null, syncStatus: 'LOCAL', version: 1,
     }
-    await this.database.db.syncQueue.put(record)
+    await db.syncQueue.put(record)
     queueEvents.dispatchEvent(new Event('change'))
     return structuredClone(record)
   }
@@ -76,7 +77,7 @@ export class SyncQueueService {
     await this.database.db.syncQueue.where('id').anyOf(ids).modify({ status: 'PROCESSING', updatedAt: now })
   }
 
-  async complete(id: string): Promise<void> { await this.database.db.syncQueue.delete(id); queueEvents.dispatchEvent(new Event('change')) }
+  async complete(id: string, db = this.database.db): Promise<void> { await db.syncQueue.delete(id); queueEvents.dispatchEvent(new Event('change')) }
 
   async fail(item: SyncQueueRecord, error: unknown, conflict = false): Promise<void> {
     const retryCount = item.retryCount + 1

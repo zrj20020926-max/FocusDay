@@ -11,6 +11,10 @@ import { HabitRepository } from '../database/repositories/HabitRepository'
 import { HabitRecordRepository } from '../database/repositories/HabitRecordRepository'
 import { AchievementRepository } from '../database/repositories/AchievementRepository'
 import { AchievementService } from '../achievement/AchievementService'
+import { sqliteTestFixture } from '../database/sqliteTestFixture'
+import { TaskService } from '../task/TaskService'
+import { FocusSessionRepository } from '../database/repositories/FocusSessionRepository'
+import type { FocusSession } from '../../types/focusSession'
 
 type Row = Record<string, any>
 
@@ -44,6 +48,7 @@ class MemoryQuery implements PromiseLike<{ data: any; error: any }> {
         const existing = this.rows.find(row => row.id === value.id || (row.user_id === value.user_id && (
           (this.table === 'habit_records' && row.habit_id === value.habit_id && row.record_date === value.record_date)
           || (this.table === 'user_settings' && row.key === value.key)
+          || (this.table === 'focus_sessions' && value.source_record_id && row.source_record_id === value.source_record_id)
         )))
         if (existing) return { data: [], error: { code: '23505', message: 'duplicate key' } }
         this.rows.push(value)
@@ -67,15 +72,21 @@ class MemorySupabase {
   from(table: string) { return new MemoryQuery(this.tables[table], table) }
 }
 
-const databases: DatabaseService[] = []
-afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(databases.splice(0).map(db => db.delete())) })
+const disposers: Array<() => void | Promise<void>> = []
+afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(disposers.splice(0).map(dispose => dispose())) })
 
-async function setup() {
-  const db = new DatabaseService(`sync-service-${crypto.randomUUID()}`); databases.push(db); await db.initialize()
-  await db.transaction(async () => {
-    await Promise.all([db.db.tasks.clear(), db.db.categories.clear(), db.db.focusSessions.clear(), db.db.timerStates.clear(), db.db.userSettings.clear(), db.db.syncQueue.clear()])
-  })
+async function setupStorage(platform: string, provisionDefaults = false) {
+  const name = `sync-service-${crypto.randomUUID()}`
+  const fixture = platform === 'SQLite' ? await sqliteTestFixture() : undefined
   const cloud = new MemorySupabase()
+  const db = new DatabaseService(name, fixture?.backend())
+  if (fixture || provisionDefaults) db.selectOwner((await cloud.auth.getUser()).data.user.id)
+  if (fixture) disposers.push(fixture.close)
+  else disposers.push(() => db.delete())
+  await db.transaction(async tables => {
+    if (!provisionDefaults) await tables.categories.clear()
+    await Promise.all([tables.tasks.clear(), tables.focusSessions.clear(), tables.timerStates.clear(), tables.userSettings.clear(), tables.syncQueue.clear()])
+  })
   const queue = new SyncQueueService(db)
   const status = new SyncStatusService()
   const sync = new SyncService(db, queue, status, async () => cloud as any)
@@ -84,7 +95,41 @@ async function setup() {
 
 const now = () => new Date().toISOString()
 
-describe('SyncService', () => {
+describe.each(['IndexedDB', 'SQLite'])('SyncService (%s)', platform => {
+  const setup = () => setupStorage(platform)
+
+  it('复用既有云端默认分类并为离线任务替换分类引用', async () => {
+    const { db, cloud, sync, repository } = await setupStorage(platform, true)
+    const userId = (await cloud.auth.getUser()).data.user.id
+    const canonicalCategory = { id: crypto.randomUUID(), user_id: userId, name: '其他', color: '#92aa8b', icon: 'Shapes',
+      is_default: true, version: 1, created_at: now(), updated_at: now(), deleted_at: null }
+    cloud.tables.categories.push(canonicalCategory)
+    const task = await new TaskService(repository).create({ title: '初次同步之前离线创建' })
+    expect(task.categoryId).not.toBe(canonicalCategory.id)
+    await sync.syncNow()
+    expect(await db.db.tasks.get(task.id)).toMatchObject({ categoryId: canonicalCategory.id, syncStatus: 'SYNCED' })
+    expect(cloud.tables.tasks[0]).toMatchObject({ id: task.id, category_id: canonicalCategory.id })
+    expect(cloud.tables.categories.filter(category => category.name === '其他')).toHaveLength(1)
+  })
+
+  it('Web 和原生同步同一计时来源只保留一条专注记录', async () => {
+    const device = await setup()
+    const peer = await setupStorage(platform === 'SQLite' ? 'IndexedDB' : 'SQLite')
+    const first = new FocusSessionRepository(device.db)
+    const second = new FocusSessionRepository(peer.db)
+    const endTime = Date.now()
+    const session: FocusSession = { id: crypto.randomUUID(), taskId: null, habitId: null, mode: 'STOPWATCH',
+      startTime: endTime - 60_000, endTime, duration: 60_000, status: 'COMPLETED', createdAt: endTime,
+      sourceRecordId: 'same-timer-phase', completedNaturally: false, completedPomodoros: 0 }
+    await first.bulkUpsert([session])
+    await second.bulkUpsert([{ ...session, id: crypto.randomUUID() }])
+    await device.sync.syncNow()
+    await new SyncService(peer.db, peer.queue, peer.status, async () => device.cloud as any).syncNow()
+    expect(device.cloud.tables.focus_sessions).toHaveLength(1)
+    expect(await first.list()).toMatchObject([{ id: session.id }])
+    expect(await second.list()).toMatchObject([{ id: session.id }])
+    expect(await peer.queue.countPending()).toBe(0)
+  })
   it('同一成就由两台离线设备独立解锁后合并，第三台恢复同一记录', async () => {
     const left = await setup()
     const right = await setup()
@@ -200,7 +245,7 @@ describe('SyncService', () => {
   })
 
   it('云端请求超时不会重复启动同步且保留清晰错误状态', async () => {
-    const db = new DatabaseService(`sync-timeout-${crypto.randomUUID()}`); databases.push(db)
+    const { db } = await setup()
     let calls = 0
     const pendingClient = () => { calls += 1; return new Promise<any>(() => undefined) }
     const status = new SyncStatusService()

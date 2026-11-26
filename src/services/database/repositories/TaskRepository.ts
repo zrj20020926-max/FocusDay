@@ -44,24 +44,23 @@ export class IndexedDbTaskRepository implements TaskRepository {
   }
 
   async saveTask(task: Task): Promise<Task> {
-    await this.database.initialize()
-    const previous = await this.database.db.tasks.get(task.id)
-    await this.database.transaction(async () => {
+    await this.database.transaction(async db => {
+      const previous = await db.tasks.get(task.id)
       const record = taskRecord(task, previous)
-      await this.database.db.tasks.put(record)
-      await this.queue.enqueueWithinTransaction({ entityType: 'TASK', entityId: task.id, operation: previous ? 'UPDATE' : 'INSERT', payload: record,
+      await db.tasks.put(record)
+      await this.queue.enqueueWithinTransaction(db, { entityType: 'TASK', entityId: task.id, operation: previous ? 'UPDATE' : 'INSERT', payload: record,
         baseVersion: previous?.version ?? 0, baseUpdatedAt: previous?.updatedAt ?? null })
     })
     return clone(task)
   }
 
   async saveTasks(tasks: Task[]): Promise<Task[]> {
-    await this.database.transaction(async () => {
+    await this.database.transaction(async db => {
       const ids = tasks.map(task => task.id)
-      const previous = await this.database.db.tasks.bulkGet(ids)
+      const previous = await db.tasks.bulkGet(ids)
       const records = tasks.map((task, index) => taskRecord(task, previous[index]))
-      await this.database.db.tasks.bulkPut(records)
-      await Promise.all(records.map((record, index) => this.queue.enqueueWithinTransaction({ entityType: 'TASK', entityId: record.id,
+      await db.tasks.bulkPut(records)
+      await Promise.all(records.map((record, index) => this.queue.enqueueWithinTransaction(db, { entityType: 'TASK', entityId: record.id,
         operation: previous[index] ? 'UPDATE' : 'INSERT', payload: record, baseVersion: previous[index]?.version ?? 0,
         baseUpdatedAt: previous[index]?.updatedAt ?? null })))
     })
@@ -69,17 +68,16 @@ export class IndexedDbTaskRepository implements TaskRepository {
   }
 
   async deleteTask(id: string): Promise<boolean> {
-    await this.database.initialize()
-    const current = await this.database.db.tasks.get(id)
-    if (!current || current.deletedAt) return false
-    const now = new Date().toISOString()
-    await this.database.transaction(async () => {
+    return this.database.transaction(async db => {
+      const current = await db.tasks.get(id)
+      if (!current || current.deletedAt) return false
+      const now = new Date().toISOString()
       const record = { ...current, deletedAt: now, updatedAt: now, syncStatus: 'PENDING' as const, version: current.version + 1 }
-      await this.database.db.tasks.put(record)
-      await this.queue.enqueueWithinTransaction({ entityType: 'TASK', entityId: id, operation: 'DELETE', payload: record,
+      await db.tasks.put(record)
+      await this.queue.enqueueWithinTransaction(db, { entityType: 'TASK', entityId: id, operation: 'DELETE', payload: record,
         baseVersion: current.version, baseUpdatedAt: current.updatedAt })
+      return true
     })
-    return true
   }
 
   async listCategories(): Promise<TaskCategory[]> {
@@ -97,27 +95,26 @@ export class IndexedDbTaskRepository implements TaskRepository {
   }
 
   async saveCategory(category: TaskCategory): Promise<TaskCategory> {
-    await this.database.initialize()
-    const previous = await this.database.db.categories.get(category.id)
-    await this.database.transaction(async () => {
+    await this.database.transaction(async db => {
+      const previous = await db.categories.get(category.id)
       const record = categoryRecord(category, previous)
-      await this.database.db.categories.put(record)
-      await this.queue.enqueueWithinTransaction({ entityType: 'CATEGORY', entityId: category.id, operation: previous ? 'UPDATE' : 'INSERT', payload: record,
+      await db.categories.put(record)
+      await this.queue.enqueueWithinTransaction(db, { entityType: 'CATEGORY', entityId: category.id, operation: previous ? 'UPDATE' : 'INSERT', payload: record,
         baseVersion: previous?.version ?? 0, baseUpdatedAt: previous?.updatedAt ?? null })
     })
     return clone(category)
   }
 
   async deleteCategory(categoryId: string, replacementCategoryId: string): Promise<boolean> {
-    return this.database.transaction(async () => {
+    return this.database.transaction(async db => {
       const [current, replacement] = await Promise.all([
-        this.database.db.categories.get(categoryId),
-        this.database.db.categories.get(replacementCategoryId),
+        db.categories.get(categoryId),
+        db.categories.get(replacementCategoryId),
       ])
       if (!replacement || replacement.deletedAt) throw new TaskDomainError('替代分类不存在', 'INVALID_RELATION')
       if (!current || current.deletedAt) return false
       const now = new Date().toISOString()
-      const linkedTasks = await this.database.db.tasks.where('categoryId').equals(categoryId).toArray()
+      const linkedTasks = await db.tasks.where('categoryId').equals(categoryId).toArray()
       const activeTasks = linkedTasks.filter(task => !task.deletedAt)
       const movedTasks = activeTasks.map(task => ({
         ...task,
@@ -126,13 +123,13 @@ export class IndexedDbTaskRepository implements TaskRepository {
         syncStatus: 'PENDING' as const,
         version: task.version + 1,
       }))
-      await this.database.db.tasks.bulkPut(movedTasks)
-      await Promise.all(movedTasks.map((task, index) => this.queue.enqueueWithinTransaction({ entityType: 'TASK', entityId: task.id,
+      await db.tasks.bulkPut(movedTasks)
+      await Promise.all(movedTasks.map((task, index) => this.queue.enqueueWithinTransaction(db, { entityType: 'TASK', entityId: task.id,
         operation: 'UPDATE', payload: task, baseVersion: activeTasks[index]?.version ?? task.version - 1,
         baseUpdatedAt: activeTasks[index]?.updatedAt ?? null })))
       const deleted = { ...current, deletedAt: now, updatedAt: now, syncStatus: 'PENDING' as const, version: current.version + 1 }
-      await this.database.db.categories.put(deleted)
-      await this.queue.enqueueWithinTransaction({ entityType: 'CATEGORY', entityId: categoryId, operation: 'DELETE', payload: deleted,
+      await db.categories.put(deleted)
+      await this.queue.enqueueWithinTransaction(db, { entityType: 'CATEGORY', entityId: categoryId, operation: 'DELETE', payload: deleted,
         baseVersion: current.version, baseUpdatedAt: current.updatedAt })
       return true
     })

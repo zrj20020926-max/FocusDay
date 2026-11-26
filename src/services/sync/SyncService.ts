@@ -5,6 +5,8 @@ import type { SyncEntityType } from '../../types/sync'
 import { reminderKey } from '../../types/notification'
 import { isAchievementKey, readAchievement } from '../../types/achievement'
 import { DatabaseService, databaseService } from '../database/DatabaseService'
+import type { DatabaseTables } from '../database/DatabaseTables'
+import { DEFAULT_CATEGORIES_ID } from '../database/migrations/accountStorageMigration'
 import { getSupabaseClient } from '../supabase/client'
 import { SyncConflictResolver, type VersionedValue } from './SyncConflictResolver'
 import { SyncQueueService, syncQueueService } from './SyncQueueService'
@@ -50,6 +52,7 @@ export class SyncService {
       const user = await this.requireUser(client)
       await this.database.initialize()
       await this.bindUser(user)
+      await this.reconcileDefaultCategories(client, user)
       await this.normalizeLocalIds()
       await this.queue.recoverInterrupted()
       await this.seedMissingQueueItems()
@@ -76,61 +79,104 @@ export class SyncService {
   }
 
   private async bindUser(user: User): Promise<void> {
+    if (this.database.owner !== undefined && this.database.owner !== user.id) {
+      throw new SyncError('当前认证用户与本地数据空间不一致', 'AUTH')
+    }
     const existing = await this.database.db.syncMetadata.get('sync:bound-user')
     const bound = (existing?.value as { userId?: string } | null)?.userId
     if (bound && bound !== user.id) throw new SyncError('此设备的本地数据已绑定其他账号，请先导出数据或使用原账号登录', 'AUTH')
     if (!bound) await this.setMetadata('sync:bound-user', { userId: user.id })
   }
 
+  private async reconcileDefaultCategories(client: Client, user: User): Promise<void> {
+    if (!this.database.owner) return
+    const marker = await this.database.db.syncMetadata.get(DEFAULT_CATEGORIES_ID)
+    if (!marker) return
+    const defaults = marker.value as { id: string; name: string }[]
+    const { data, error } = await client.from(TABLES.CATEGORY).select('*').eq('user_id', user.id).in('name', defaults.map(value => value.name))
+    if (error) throw this.cloudError(error)
+    const existing = new Map<string, RemoteRow>((data ?? []).filter((row: RemoteRow) => !row.deleted_at)
+      .map((row: RemoteRow) => [row.name, row] as const))
+    await this.database.transaction(async db => {
+      const unmatched = []
+      for (const seed of defaults) {
+        const remote = existing.get(seed.name)
+        const local = await db.categories.get(seed.id)
+        if (!local) continue
+        if (!remote) { unmatched.push(seed); continue }
+        if (remote.id === seed.id) {
+          if (local.version === 1 && local.syncStatus !== 'SYNCED') {
+            await this.applyRemote('CATEGORY', remote, db)
+            await db.syncQueue.where('[entityType+entityId]').equals(['CATEGORY', seed.id]).delete()
+          }
+          continue
+        }
+        await db.categories.delete(seed.id)
+        await db.syncQueue.where('[entityType+entityId]').equals(['CATEGORY', seed.id]).delete()
+        if (local.version > 1 && local.syncStatus !== 'SYNCED') {
+          const record: CategoryRecord = { ...local, id: remote.id, version: remote.version + 1 }
+          await db.categories.put(record)
+          await this.queue.enqueueWithinTransaction(db, { entityType: 'CATEGORY', entityId: remote.id,
+            operation: record.deletedAt ? 'DELETE' : 'UPDATE', payload: record, baseVersion: remote.version, baseUpdatedAt: remote.updated_at })
+        } else await this.applyRemote('CATEGORY', remote, db)
+        await db.tasks.where('categoryId').equals(seed.id).modify({ categoryId: remote.id })
+        const queued = await db.syncQueue.where('entityType').equals('TASK').filter(item => (item.payload as TaskRecord).categoryId === seed.id).toArray()
+        for (const item of queued) await db.syncQueue.update(item.id, { payload: { ...item.payload as TaskRecord, categoryId: remote.id } })
+      }
+      if (unmatched.length) await db.syncMetadata.update(marker.id, { value: unmatched })
+      else await db.syncMetadata.delete(marker.id)
+    })
+  }
+
   private async normalizeLocalIds(): Promise<void> {
     const marker = await this.database.db.syncMetadata.get('sync:uuid-normalized')
     if (marker) return
-    await this.database.transaction(async () => {
-      const categories = await this.database.db.categories.toArray()
+    await this.database.transaction(async db => {
+      const categories = await db.categories.toArray()
       const categoryIds = new Map(categories.filter(item => !UUID.test(item.id)).map(item => [item.id, crypto.randomUUID()]))
-      const tasks = await this.database.db.tasks.toArray()
+      const tasks = await db.tasks.toArray()
       const taskIds = new Map(tasks.filter(item => !UUID.test(item.id)).map(item => [item.id, crypto.randomUUID()]))
-      const sessions = await this.database.db.focusSessions.toArray()
+      const sessions = await db.focusSessions.toArray()
       const sessionIds = new Map(sessions.filter(item => !UUID.test(item.id)).map(item => [item.id, crypto.randomUUID()]))
-      const habits = await this.database.db.habits.toArray()
+      const habits = await db.habits.toArray()
       const habitIds = new Map(habits.filter(item => !UUID.test(item.id)).map(item => [item.id, crypto.randomUUID()]))
-      const habitRecords = await this.database.db.habitRecords.toArray()
+      const habitRecords = await db.habitRecords.toArray()
       const habitRecordIds = new Map(habitRecords.filter(item => !UUID.test(item.id)).map(item => [item.id, crypto.randomUUID()]))
       if (categoryIds.size) {
-        await this.database.db.categories.bulkDelete([...categoryIds.keys()])
-        await this.database.db.categories.bulkPut(categories.map(item => ({ ...item, id: categoryIds.get(item.id) ?? item.id })))
+        await db.categories.bulkDelete([...categoryIds.keys()])
+        await db.categories.bulkPut(categories.map(item => ({ ...item, id: categoryIds.get(item.id) ?? item.id })))
       }
       if (taskIds.size || categoryIds.size) {
-        await this.database.db.tasks.bulkDelete([...taskIds.keys()])
-        await this.database.db.tasks.bulkPut(tasks.map(item => ({ ...item, id: taskIds.get(item.id) ?? item.id,
+        await db.tasks.bulkDelete([...taskIds.keys()])
+        await db.tasks.bulkPut(tasks.map(item => ({ ...item, id: taskIds.get(item.id) ?? item.id,
           categoryId: categoryIds.get(item.categoryId) ?? item.categoryId })))
       }
       if (habitIds.size) {
-        await this.database.db.habits.bulkDelete([...habitIds.keys()])
-        await this.database.db.habits.bulkPut(habits.map(item => ({ ...item, id: habitIds.get(item.id) ?? item.id })))
+        await db.habits.bulkDelete([...habitIds.keys()])
+        await db.habits.bulkPut(habits.map(item => ({ ...item, id: habitIds.get(item.id) ?? item.id })))
       }
       if (habitRecordIds.size || habitIds.size) {
-        await this.database.db.habitRecords.bulkDelete([...habitRecordIds.keys()])
-        await this.database.db.habitRecords.bulkPut(habitRecords.map(item => ({ ...item, id: habitRecordIds.get(item.id) ?? item.id,
+        await db.habitRecords.bulkDelete([...habitRecordIds.keys()])
+        await db.habitRecords.bulkPut(habitRecords.map(item => ({ ...item, id: habitRecordIds.get(item.id) ?? item.id,
           habitId: habitIds.get(item.habitId) ?? item.habitId })))
       }
       if (sessionIds.size || taskIds.size || habitIds.size) {
-        await this.database.db.focusSessions.bulkDelete([...sessionIds.keys()])
-        await this.database.db.focusSessions.bulkPut(sessions.map(item => ({ ...item, id: sessionIds.get(item.id) ?? item.id,
+        await db.focusSessions.bulkDelete([...sessionIds.keys()])
+        await db.focusSessions.bulkPut(sessions.map(item => ({ ...item, id: sessionIds.get(item.id) ?? item.id,
           taskId: item.taskId ? taskIds.get(item.taskId) ?? item.taskId : null,
           habitId: item.habitId ? habitIds.get(item.habitId) ?? item.habitId : null })))
       }
       for (const [target, ids] of [['task', taskIds], ['habit', habitIds]] as const) {
         for (const [oldId, newId] of ids) {
           const previousKey = reminderKey(target, oldId)
-          const setting = await this.database.db.userSettings.get(previousKey)
+          const setting = await db.userSettings.get(previousKey)
           if (setting) {
-            await this.database.db.userSettings.put({ ...setting, id: reminderKey(target, newId) })
-            await this.database.db.userSettings.delete(previousKey)
+            await db.userSettings.put({ ...setting, id: reminderKey(target, newId) })
+            await db.userSettings.delete(previousKey)
           }
         }
       }
-      const timer = await this.database.db.timerStates.get('active')
+      const timer = await db.timerStates.get('active')
       if (timer && (taskIds.size || habitIds.size)) {
         const snapshot = structuredClone(timer.snapshot)
         if (snapshot.state.taskId) snapshot.state.taskId = taskIds.get(snapshot.state.taskId) ?? snapshot.state.taskId
@@ -138,30 +184,30 @@ export class SyncService {
         snapshot.records = snapshot.records.map(record => ({ ...record,
           taskId: record.taskId ? taskIds.get(record.taskId) ?? record.taskId : null,
           habitId: record.habitId ? habitIds.get(record.habitId) ?? record.habitId : null }))
-        await this.database.db.timerStates.put({ ...timer, snapshot })
+        await db.timerStates.put({ ...timer, snapshot })
       }
-      await this.database.db.syncQueue.clear()
+      if (categoryIds.size || taskIds.size || sessionIds.size || habitIds.size || habitRecordIds.size) await db.syncQueue.clear()
       const now = new Date().toISOString()
-      await this.database.db.syncMetadata.put({ id: 'sync:uuid-normalized', lastSyncedAt: null, cursor: null, value: { at: now },
+      await db.syncMetadata.put({ id: 'sync:uuid-normalized', lastSyncedAt: null, cursor: null, value: { at: now },
         createdAt: now, updatedAt: now, deletedAt: null, syncStatus: 'LOCAL', version: 1 })
     })
   }
 
   private async seedMissingQueueItems(): Promise<void> {
-    await this.database.transaction(async () => {
-      const existing = new Set((await this.database.db.syncQueue.toArray()).filter(item => !item.deletedAt).map(item => `${item.entityType}:${item.entityId}`))
+    await this.database.transaction(async db => {
+      const existing = new Set((await db.syncQueue.toArray()).filter(item => !item.deletedAt).map(item => `${item.entityType}:${item.entityId}`))
       const add = async (entityType: SyncEntityType, entityId: string, record: any) => {
         if (record.syncStatus === 'SYNCED' || existing.has(`${entityType}:${entityId}`)) return
-        await this.queue.enqueueWithinTransaction({ entityType, entityId, operation: record.deletedAt ? 'DELETE' : record.version <= 1 ? 'INSERT' : 'UPDATE',
+        await this.queue.enqueueWithinTransaction(db, { entityType, entityId, operation: record.deletedAt ? 'DELETE' : record.version <= 1 ? 'INSERT' : 'UPDATE',
           payload: record, baseVersion: Math.max(0, record.version - 1), baseUpdatedAt: null })
       }
-      for (const item of await this.database.db.categories.toArray()) await add('CATEGORY', item.id, item)
-      for (const item of await this.database.db.tasks.toArray()) await add('TASK', item.id, item)
-      for (const item of await this.database.db.habits.toArray()) await add('HABIT', item.id, item)
-      for (const item of await this.database.db.habitRecords.toArray()) await add('HABIT_RECORD', item.id, item)
-      for (const item of await this.database.db.focusSessions.toArray()) await add('FOCUS_SESSION', item.id, item)
-      for (const item of await this.database.db.userSettings.toArray()) await add('USER_SETTING', item.id, item)
-      for (const item of await this.database.db.timerStates.toArray()) await add('TIMER_STATE', item.id, item)
+      for (const item of await db.categories.toArray()) await add('CATEGORY', item.id, item)
+      for (const item of await db.tasks.toArray()) await add('TASK', item.id, item)
+      for (const item of await db.habits.toArray()) await add('HABIT', item.id, item)
+      for (const item of await db.habitRecords.toArray()) await add('HABIT_RECORD', item.id, item)
+      for (const item of await db.focusSessions.toArray()) await add('FOCUS_SESSION', item.id, item)
+      for (const item of await db.userSettings.toArray()) await add('USER_SETTING', item.id, item)
+      for (const item of await db.timerStates.toArray()) await add('TIMER_STATE', item.id, item)
     })
   }
 
@@ -172,7 +218,8 @@ export class SyncService {
     await this.queue.markProcessing(items.map(item => item.id))
     for (const entityType of ENTITY_ORDER) {
       const group = items.filter(item => item.entityType === entityType)
-      const batchable = group.filter(item => item.operation === 'INSERT' && !isHabitEntity(item.entityType) && !['TIMER_STATE', 'USER_SETTING'].includes(item.entityType))
+      const batchable = group.filter(item => item.operation === 'INSERT' && !isHabitEntity(item.entityType) &&
+        !['TIMER_STATE', 'USER_SETTING', 'FOCUS_SESSION'].includes(item.entityType))
       const batched = batchable.length > 1 ? batchable : []
       if (batched.length) {
         try { await this.pushInsertBatch(client, user, batched) }
@@ -185,7 +232,7 @@ export class SyncService {
         try {
           if (isHabitEntity(item.entityType)) await this.pushHabitItem(client, user, item)
           else if (item.entityType === 'USER_SETTING' && isAchievementKey(item.entityId)) await this.pushAchievement(client, user, item)
-          else { await this.pushItem(client, user, item); await this.queue.complete(item.id) }
+          else await this.pushItem(client, user, item)
         }
         catch (error) {
           const conflict = error instanceof SyncError && error.kind === 'CONFLICT'
@@ -256,15 +303,19 @@ export class SyncService {
     await this.acceptVersionedRemote(item, data)
   }
 
-  private async acceptVersionedRemote(item: SyncQueueRecord, row: RemoteRow): Promise<void> {
-    await this.database.transaction(async () => {
-      const current = await this.database.db.syncQueue.get(item.id)
-      if (current && current.version !== item.version) {
-        await this.database.db.syncQueue.update(item.id, { baseVersion: row.version, baseUpdatedAt: row.updated_at, status: 'PENDING' })
+  private async acceptVersionedRemote(item: SyncQueueRecord, row: RemoteRow | null): Promise<void> {
+    await this.database.transaction(async db => {
+      const current = await db.syncQueue.get(item.id)
+      if (!current) return
+      if (current.version !== item.version) {
+        await db.syncQueue.update(item.id, {
+          baseVersion: row?.version ?? 0, baseUpdatedAt: row?.updated_at ?? null, status: 'PENDING',
+        })
         return
       }
-      await this.applyRemote(item.entityType, row)
-      if (current) await this.queue.complete(item.id)
+      if (row) await this.applyRemote(item.entityType, row, db)
+      else await this.localTable(item.entityType, db).update(item.entityId, { syncStatus: 'SYNCED' })
+      await this.queue.complete(item.id, db)
     })
   }
 
@@ -285,33 +336,27 @@ export class SyncService {
       for (const item of fresh) {
         const row = inserted.get(item.entityId)
         if (!row) throw new SyncError('批量上传结果不完整', 'DATA')
-        await this.markLocalSynced(item, row)
-        await this.queue.complete(item.id)
+        await this.acceptVersionedRemote(item, row)
       }
     }
     for (const item of items.filter(item => existingById.has(item.entityId))) {
       await this.resolveUploadConflict(client, user, item, existingById.get(item.entityId)!)
-      await this.queue.complete(item.id)
     }
   }
 
   private async pushItem(client: Client, user: User, item: SyncQueueRecord): Promise<void> {
     const table = TABLES[item.entityType]
     const remote = await this.findRemote(client, user.id, item)
-    if (item.operation === 'INSERT' && !remote) {
-      const row = this.toRemote(item, user.id, null)
-      const { data, error } = await client.from(table).insert(row).select('*').single()
-      if (error) throw this.cloudError(error)
-      await this.markLocalSynced(item, data)
-      return
-    }
     if (!remote && item.operation !== 'DELETE') {
       const { data, error } = await client.from(table).insert(this.toRemote(item, user.id, null)).select('*').single()
-      if (error) throw this.cloudError(error)
-      await this.markLocalSynced(item, data)
+      if (!error) { await this.acceptVersionedRemote(item, data); return }
+      if (error.code !== '23505') throw this.cloudError(error)
+      const existing = await this.findRemote(client, user.id, item)
+      if (!existing) throw this.cloudError(error)
+      await this.resolveUploadConflict(client, user, item, existing)
       return
     }
-    if (!remote && item.operation === 'DELETE') { await this.markLocalSynced(item, null); return }
+    if (!remote && item.operation === 'DELETE') { await this.acceptVersionedRemote(item, null); return }
     if (remote && (remote.version !== item.baseVersion || item.operation === 'INSERT')) {
       await this.resolveUploadConflict(client, user, item, remote)
       return
@@ -320,25 +365,30 @@ export class SyncService {
     let query = client.from(table).update(row).eq('user_id', user.id).eq('version', item.baseVersion)
     query = item.entityType === 'TIMER_STATE' || item.entityType === 'USER_SETTING'
       ? query.eq(item.entityType === 'TIMER_STATE' ? 'id' : 'key', item.entityType === 'TIMER_STATE' ? remote!.id : item.entityId)
-      : query.eq('id', item.entityId)
+      : query.eq('id', remote!.id)
     const { data, error } = await query.select('*').maybeSingle()
     if (error) throw this.cloudError(error)
     if (!data) throw new SyncError('远端版本已变化，请重新同步', 'CONFLICT')
-    await this.markLocalSynced(item, data)
+    await this.acceptVersionedRemote(item, data)
   }
 
   private async resolveUploadConflict(client: Client, user: User, item: SyncQueueRecord, remote: RemoteRow): Promise<void> {
+    if (item.entityType === 'FOCUS_SESSION' && item.operation === 'INSERT' &&
+      remote.source_record_id && remote.source_record_id === (item.payload as FocusSessionRecord).sourceRecordId) {
+      await this.acceptVersionedRemote(item, remote)
+      return
+    }
     const local = this.localVersion(item.payload)
     const remoteVersion: VersionedValue = { version: remote.version, updatedAt: remote.updated_at, deletedAt: remote.deleted_at, payload: remote }
     const decision = this.conflicts.choose(local, remoteVersion)
     const reason = item.entityType === 'TIMER_STATE' ? 'SIMULTANEOUS_TIMER' : decision.reason
     await this.conflicts.record(item.entityType, item.entityId, item.payload, remote, decision.winner, reason)
-    if (decision.winner === 'REMOTE') { await this.applyRemote(item.entityType, remote); await this.queue.complete(item.id); return }
+    if (decision.winner === 'REMOTE') { await this.acceptVersionedRemote(item, remote); return }
     const row = this.toRemote({ ...item, baseVersion: remote.version }, user.id, remote)
     const { data, error } = await client.from(TABLES[item.entityType]).update(row).eq('user_id', user.id).eq('id', remote.id).eq('version', remote.version).select('*').maybeSingle()
     if (error) throw this.cloudError(error)
     if (!data) throw new SyncError('冲突解决期间远端数据再次变化', 'CONFLICT')
-    await this.markLocalSynced(item, data)
+    await this.acceptVersionedRemote(item, data)
   }
 
   private async pull(client: Client, user: User): Promise<void> {
@@ -367,41 +417,37 @@ export class SyncService {
   }
 
   private async mergeRemote(entityType: SyncEntityType, row: RemoteRow): Promise<void> {
-    if (entityType === 'USER_SETTING' && isAchievementKey(row.key)) {
-      if (row.deleted_at || !readAchievement(row.key, row.value)) return
-      await this.database.transaction(async () => {
-        await this.applyRemote(entityType, row)
-        const pending = await this.database.db.syncQueue.where('[entityType+entityId]').equals([entityType, row.key]).toArray()
-        for (const item of pending) await this.queue.complete(item.id)
-      })
-      return
-    }
-    if (isHabitEntity(entityType)) {
-      await this.database.transaction(async () => {
-        const local = entityType === 'HABIT_RECORD'
-          ? await this.database.db.habitRecords.where('[habitId+recordDate]').equals([row.habit_id, row.record_date]).first()
-          : await this.database.db.habits.get(row.id)
-        const entityId = local?.id ?? row.id
-        const pending = await this.database.db.syncQueue.where('[entityType+entityId]').equals([entityType, entityId]).first()
-        if (!pending) { await this.applyRemote(entityType, row); return }
-        if (row.version <= pending.baseVersion && row.updated_at === pending.baseUpdatedAt) return
-        const decision = this.conflicts.choose(this.localVersion(pending.payload), this.remoteVersion(row))
-        await this.conflicts.record(entityType, entityId, pending.payload, row, decision.winner, decision.reason)
-        if (decision.winner === 'REMOTE') {
-          await this.applyRemote(entityType, row)
-          await this.queue.complete(pending.id)
-        }
-      })
-      return
-    }
-    const entityId = entityType === 'USER_SETTING' ? row.key : entityType === 'TIMER_STATE' ? 'active' : row.id
-    const pending = (await this.database.db.syncQueue.where('[entityType+entityId]').equals([entityType, entityId]).toArray()).find(item => !item.deletedAt)
-    if (!pending) { await this.applyRemote(entityType, row); return }
-    const decision = this.conflicts.choose(this.localVersion(pending.payload), { version: row.version, updatedAt: row.updated_at, deletedAt: row.deleted_at, payload: row })
-    await this.conflicts.record(entityType, entityId, pending.payload, row, decision.winner,
-      entityType === 'TIMER_STATE' ? 'SIMULTANEOUS_TIMER' : decision.reason)
-    if (decision.winner === 'REMOTE') { await this.applyRemote(entityType, row); await this.queue.complete(pending.id) }
-    else await this.database.db.syncQueue.update(pending.id, { baseVersion: row.version, baseUpdatedAt: row.updated_at, status: 'PENDING', nextAttemptAt: null })
+    await this.database.transaction(async db => {
+      if (entityType === 'USER_SETTING' && isAchievementKey(row.key)) {
+        if (row.deleted_at || !readAchievement(row.key, row.value)) return
+        await this.applyRemote(entityType, row, db)
+        const pending = await db.syncQueue.where('[entityType+entityId]').equals([entityType, row.key]).toArray()
+        for (const item of pending) await this.queue.complete(item.id, db)
+        return
+      }
+      const habitRecord = entityType === 'HABIT_RECORD'
+        ? await db.habitRecords.where('[habitId+recordDate]').equals([row.habit_id, row.record_date]).first()
+        : undefined
+      const focusSession = entityType === 'FOCUS_SESSION' && row.source_record_id
+        ? await db.focusSessions.where('sourceRecordId').equals(row.source_record_id).first() : undefined
+      const entityId = entityType === 'USER_SETTING' ? row.key : entityType === 'TIMER_STATE' ? 'active' : habitRecord?.id ?? focusSession?.id ?? row.id
+      const pending = (await db.syncQueue.where('[entityType+entityId]').equals([entityType, entityId]).toArray()).find(item => !item.deletedAt)
+      if (!pending || (focusSession && pending.operation === 'INSERT')) {
+        await this.applyRemote(entityType, row, db)
+        if (pending) await this.queue.complete(pending.id, db)
+        return
+      }
+      if (row.version <= pending.baseVersion && row.updated_at === pending.baseUpdatedAt) return
+      const decision = this.conflicts.choose(this.localVersion(pending.payload), this.remoteVersion(row))
+      await this.conflicts.record(entityType, entityId, pending.payload, row, decision.winner,
+        entityType === 'TIMER_STATE' ? 'SIMULTANEOUS_TIMER' : decision.reason, db)
+      if (decision.winner === 'REMOTE') {
+        await this.applyRemote(entityType, row, db)
+        await this.queue.complete(pending.id, db)
+      } else if (!isHabitEntity(entityType)) {
+        await db.syncQueue.update(pending.id, { baseVersion: row.version, baseUpdatedAt: row.updated_at, status: 'PENDING', nextAttemptAt: null })
+      }
+    })
   }
 
   private async findRemote(client: Client, userId: string, item: SyncQueueRecord): Promise<RemoteRow | null> {
@@ -409,6 +455,8 @@ export class SyncService {
     if (item.entityType === 'HABIT_RECORD') {
       const record = item.payload as HabitRecordEntity
       query = query.eq('habit_id', record.habitId).eq('record_date', record.recordDate)
+    } else if (item.entityType === 'FOCUS_SESSION' && (item.payload as FocusSessionRecord).sourceRecordId) {
+      query = query.eq('source_record_id', (item.payload as FocusSessionRecord).sourceRecordId)
     } else {
       query = item.entityType === 'TIMER_STATE' ? query.limit(1) : item.entityType === 'USER_SETTING' ? query.eq('key', item.entityId) : query.eq('id', item.entityId)
     }
@@ -429,7 +477,7 @@ export class SyncService {
       weekly_target: value.weeklyTarget, start_date: value.startDate, status: value.status }
     if (item.entityType === 'HABIT_RECORD') return { id: remote?.id ?? item.entityId, ...common, habit_id: value.habitId, record_date: value.recordDate,
       actual_value: value.actualValue, manual_value: value.manualValue, focus_session_ids: value.focusSessionIds, completed: value.completed }
-    if (item.entityType === 'FOCUS_SESSION') return { id: item.entityId, ...common, task_id: value.taskId, mode: value.mode,
+    if (item.entityType === 'FOCUS_SESSION') return { id: remote?.id ?? item.entityId, ...common, task_id: value.taskId, mode: value.mode,
       habit_id: value.habitId, active_intervals: value.activeIntervals,
       start_time: this.iso(value.startTime), end_time: this.iso(value.endTime), duration: value.duration, status: value.status,
       source_record_id: value.sourceRecordId, completed_naturally: value.completedNaturally, completed_pomodoros: value.completedPomodoros }
@@ -437,65 +485,60 @@ export class SyncService {
     return { id: remote?.id ?? crypto.randomUUID(), ...common, key: item.entityId, value: value.value as Json }
   }
 
-  private async applyRemote(entityType: SyncEntityType, row: RemoteRow): Promise<void> {
+  private async applyRemote(entityType: SyncEntityType, row: RemoteRow, db: DatabaseTables): Promise<void> {
     if (entityType === 'CATEGORY') {
       const record: CategoryRecord = { id: row.id, name: row.name, color: row.color, icon: row.icon, isDefault: row.is_default,
         createdAt: row.created_at, updatedAt: row.updated_at, deletedAt: row.deleted_at, syncStatus: 'SYNCED', version: row.version }
-      await this.database.db.categories.put(record)
+      await db.categories.put(record)
     } else if (entityType === 'TASK') {
       const record: TaskRecord = { id: row.id, title: row.title, description: row.description, categoryId: row.category_id ?? '', priority: row.priority,
         status: row.status, plannedDate: row.planned_date, dueDate: row.due_date, estimatedDuration: row.estimated_duration,
         estimatedPomodoros: row.estimated_pomodoros, sortOrder: row.sort_order, completedAt: row.completed_at,
         createdAt: row.created_at, updatedAt: row.updated_at, deletedAt: row.deleted_at, syncStatus: 'SYNCED', version: row.version }
-      await this.database.db.tasks.put(record)
+      await db.tasks.put(record)
     } else if (entityType === 'HABIT') {
       const record: HabitEntityRecord = { id: row.id, name: row.name, description: row.description, icon: row.icon, color: row.color,
         goalType: row.goal_type, targetValue: row.target_value, frequency: row.frequency, weekdays: row.weekdays ?? [], weeklyTarget: row.weekly_target,
         startDate: row.start_date, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, deletedAt: row.deleted_at,
         syncStatus: 'SYNCED', version: row.version }
-      await this.database.db.habits.put(record)
+      await db.habits.put(record)
     } else if (entityType === 'HABIT_RECORD') {
       const record: HabitRecordEntity = { id: row.id, habitId: row.habit_id, recordDate: row.record_date, actualValue: row.actual_value,
         manualValue: row.manual_value, focusSessionIds: row.focus_session_ids ?? [], completed: row.completed, createdAt: row.created_at,
         updatedAt: row.updated_at, deletedAt: row.deleted_at, syncStatus: 'SYNCED', version: row.version }
-      const previous = await this.database.db.habitRecords.where('[habitId+recordDate]').equals([record.habitId, record.recordDate]).first()
-      if (previous && previous.id !== record.id) await this.database.db.habitRecords.delete(previous.id)
-      await this.database.db.habitRecords.put(record)
+      const previous = await db.habitRecords.where('[habitId+recordDate]').equals([record.habitId, record.recordDate]).first()
+      if (previous && previous.id !== record.id) await db.habitRecords.delete(previous.id)
+      await db.habitRecords.put(record)
     } else if (entityType === 'FOCUS_SESSION') {
       const record: FocusSessionRecord = { id: row.id, taskId: row.task_id, habitId: row.habit_id ?? null, mode: row.mode, startTime: Date.parse(row.start_time), endTime: Date.parse(row.end_time),
         activeIntervals: Array.isArray(row.active_intervals) ? row.active_intervals : undefined,
         duration: row.duration, status: row.status, createdAt: Date.parse(row.created_at), updatedAt: Date.parse(row.updated_at), deletedAt: row.deleted_at ? Date.parse(row.deleted_at) : null,
         sourceRecordId: row.source_record_id, completedNaturally: row.completed_naturally, completedPomodoros: row.completed_pomodoros,
         syncStatus: 'SYNCED', version: row.version }
-      await this.database.db.focusSessions.put(record)
+      if (record.sourceRecordId) {
+        const previous = await db.focusSessions.where('sourceRecordId').equals(record.sourceRecordId).first()
+        if (previous && previous.id !== record.id) await db.focusSessions.delete(previous.id)
+      }
+      await db.focusSessions.put(record)
     } else if (entityType === 'TIMER_STATE') {
       const record: TimerStateRecord = { id: 'active', snapshot: row.state, createdAt: row.created_at, updatedAt: row.updated_at,
         deletedAt: row.deleted_at, syncStatus: 'SYNCED', version: row.version }
-      await this.database.db.timerStates.put(record)
+      await db.timerStates.put(record)
     } else {
       const record: UserSettingsRecord = { id: row.key, value: row.value, createdAt: row.created_at, updatedAt: row.updated_at,
         deletedAt: row.deleted_at, syncStatus: 'SYNCED', version: row.version }
-      await this.database.db.userSettings.put(record)
+      await db.userSettings.put(record)
     }
   }
 
-  private async markLocalSynced(item: SyncQueueRecord, remote: RemoteRow | null): Promise<void> {
-    if (!remote) {
-      const table = this.localTable(item.entityType)
-      await table.update(item.entityId, { syncStatus: 'SYNCED' })
-      return
-    }
-    await this.applyRemote(item.entityType, remote)
-  }
-
-  private localTable(entityType: SyncEntityType): any {
-    if (entityType === 'CATEGORY') return this.database.db.categories
-    if (entityType === 'TASK') return this.database.db.tasks
-    if (entityType === 'HABIT') return this.database.db.habits
-    if (entityType === 'HABIT_RECORD') return this.database.db.habitRecords
-    if (entityType === 'FOCUS_SESSION') return this.database.db.focusSessions
-    if (entityType === 'TIMER_STATE') return this.database.db.timerStates
-    return this.database.db.userSettings
+  private localTable(entityType: SyncEntityType, db: DatabaseTables): any {
+    if (entityType === 'CATEGORY') return db.categories
+    if (entityType === 'TASK') return db.tasks
+    if (entityType === 'HABIT') return db.habits
+    if (entityType === 'HABIT_RECORD') return db.habitRecords
+    if (entityType === 'FOCUS_SESSION') return db.focusSessions
+    if (entityType === 'TIMER_STATE') return db.timerStates
+    return db.userSettings
   }
 
   private localVersion(payload: any): VersionedValue {

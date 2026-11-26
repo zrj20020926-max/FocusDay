@@ -5,17 +5,25 @@ import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { extname, resolve, sep } from 'node:path'
 
-const port = 4177
+const nativeFixture = process.argv.includes('--native')
+const port = nativeFixture ? 4178 : 4177
 const root = resolve('dist-e2e')
 const origin = `http://127.0.0.1:${port}`
-const build = spawnSync(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--outDir', root, '--emptyOutDir'], {
-  stdio: 'inherit',
-  env: { ...process.env, VITE_SUPABASE_URL: origin, VITE_SUPABASE_PUBLISHABLE_KEY: 'local-playwright-fixture' },
-})
-if (build.status !== 0) process.exit(build.status ?? 1)
+if (!nativeFixture) {
+  const build = spawnSync(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--outDir', root, '--emptyOutDir'], {
+    stdio: 'inherit',
+    env: { ...process.env, VITE_SUPABASE_URL: origin, VITE_SUPABASE_PUBLISHABLE_KEY: 'local-playwright-fixture' },
+  })
+  if (build.status !== 0) process.exit(build.status ?? 1)
+}
 
 const user = { id: '21bf127b-f949-44d0-ac90-3397bb80aba4', aud: 'authenticated', email: 'pwa@example.test', role: 'authenticated',
   app_metadata: {}, user_metadata: { display_name: '离线测试账号' }, created_at: '2026-01-01T00:00:00.000Z' }
+const nativeUsers = [
+  { ...user, email: 'native-a@example.test' },
+  { ...user, id: '53a5d04e-cea2-473c-a573-0b1b40a2bf99', email: 'native-b@example.test' },
+]
+const nativeTokens = new Map(nativeUsers.map((account, index) => [`fixture-token-${index}`, account]))
 const tables = Object.fromEntries(['categories', 'tasks', 'focus_sessions', 'habits', 'habit_records', 'timer_states', 'user_settings'].map(key => [key, []]))
 const appRoutes = new Set(['/', '/tasks', '/focus', '/habits', '/stats', '/achievements', '/categories', '/settings', '/account', '/me'])
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png',
@@ -36,22 +44,51 @@ function matches(row, query) {
   return true
 }
 
+async function json(request) {
+  const parts = []
+  for await (const chunk of request) parts.push(chunk)
+  return JSON.parse(Buffer.concat(parts).toString())
+}
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, origin)
     const path = decodeURIComponent(url.pathname)
+    const account = nativeFixture ? nativeTokens.get(request.headers.authorization?.replace(/^Bearer /, '')) : user
+    if (nativeFixture && request.headers.origin === 'https://localhost') {
+      response.setHeader('Access-Control-Allow-Origin', 'https://localhost')
+      response.setHeader('Access-Control-Allow-Headers', request.headers['access-control-request-headers'] ?? '*')
+      response.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST, PATCH')
+      response.setHeader('Access-Control-Allow-Private-Network', 'true')
+    }
+    if (request.method === 'OPTIONS') { response.writeHead(204); return response.end() }
     if (path === '/__test/advance-worker' && request.method === 'POST') return reply(response, 200, { revision: ++revision })
     if (path === '/__test/cloud-tasks') return reply(response, 200, tables.tasks)
-    if (path === '/auth/v1/user') return reply(response, 200, user)
+    if (nativeFixture && path === '/__test/cloud-edit' && request.method === 'POST') {
+      const { id, title } = await json(request)
+      const row = tables.tasks.find(task => task.id === id)
+      if (!row) return reply(response, 404, {})
+      Object.assign(row, { title, updated_at: new Date().toISOString(), version: row.version + 1 })
+      return reply(response, 200, row)
+    }
+    if (nativeFixture && path === '/auth/v1/token') {
+      const body = await json(request)
+      const entry = [...nativeTokens.entries()].find(([token, value]) => body.email === value.email || body.refresh_token === token)
+      if (!entry) return reply(response, 400, { message: 'Invalid login credentials' })
+      const [token, identity] = entry
+      return reply(response, 200, { access_token: token, refresh_token: token, expires_in: 3600, token_type: 'bearer', user: identity })
+    }
+    if (nativeFixture && path === '/auth/v1/logout') { response.writeHead(204); return response.end() }
+    if (path === '/auth/v1/user') return account ? reply(response, 200, account) : reply(response, 401, {})
     if (path === '/uploads/example' || path === '/api/sensitive') return reply(response, 200, { fixture: true })
     if (path.startsWith('/rest/v1/')) {
+      if (!account) return reply(response, 401, {})
       const rows = tables[path.slice('/rest/v1/'.length)]
       if (!Array.isArray(rows)) return reply(response, 404, {})
-      let result = rows.filter(row => matches(row, url.searchParams))
+      let result = rows.filter(row => (!nativeFixture || row.user_id === account.id) && matches(row, url.searchParams))
       if (request.method === 'POST' || request.method === 'PATCH') {
-        const parts = []
-        for await (const chunk of request) parts.push(chunk)
-        const body = JSON.parse(Buffer.concat(parts).toString())
+        const body = await json(request)
+        if (nativeFixture && [body].flat().some(row => row.user_id !== account.id)) return reply(response, 403, { code: '42501' })
         const now = new Date().toISOString()
         if (request.method === 'POST') {
           result = [body].flat().map(row => ({ id: randomUUID(), updated_at: now, created_at: now, ...row }))

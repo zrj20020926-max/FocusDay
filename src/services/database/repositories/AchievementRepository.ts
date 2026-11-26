@@ -1,8 +1,8 @@
-import { liveQuery } from 'dexie'
 import { ACHIEVEMENT_PREFIX, achievementKey, readAchievement, type UserAchievement } from '../../../types/achievement'
 import type { AchievementActivity } from '../../achievement/AchievementService'
 import { DatabaseService, databaseService } from '../DatabaseService'
 import { SettingsRepository } from './SettingsRepository'
+import type { DatabaseTables } from '../DatabaseTables'
 
 export class AchievementRepository {
   private readonly settings: SettingsRepository
@@ -11,18 +11,17 @@ export class AchievementRepository {
     this.settings = new SettingsRepository(database)
   }
 
-  async unlock(record: UserAchievement) {
+  async unlock(record: UserAchievement, transaction?: DatabaseTables) {
     const key = achievementKey(record.definitionId)
-    const result = await this.settings.setOnce(key, record)
+    const result = await this.settings.setOnce(key, record, transaction)
     return { record: readAchievement(key, result.value) ?? record, created: result.created }
   }
 
-  observe() { return liveQuery(() => this.snapshot()) }
+  observe() { return this.database.observe(['tasks', 'focusSessions', 'userSettings'], () => this.snapshot()) }
 
   async snapshot(): Promise<{ activity: AchievementActivity; records: UserAchievement[] }> {
     await this.database.initialize()
-    const { db } = this.database
-    return db.transaction('r', [db.tasks, db.focusSessions, db.userSettings], async () => {
+    return this.database.read(['tasks', 'focusSessions', 'userSettings'], async db => {
       const [tasks, sessions, settings] = await Promise.all([
         db.tasks.where('status').equals('COMPLETED').toArray(),
         db.focusSessions.where('status').equals('COMPLETED').filter(session => !session.deletedAt).toArray(),

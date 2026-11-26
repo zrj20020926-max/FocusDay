@@ -38,12 +38,16 @@ export class TimerRepository implements DurableTimerStorage {
 
   save(snapshot: TimerSnapshot): void {
     if (!this.initialized) throw new Error('计时仓库尚未初始化')
+    const initialIdle = !this.snapshot && snapshot.state.status === 'IDLE' && !snapshot.state.sessionId
     this.snapshot = structuredClone(snapshot)
     const queued = structuredClone(snapshot)
     this.pendingWrite = this.pendingWrite.catch(() => undefined).then(async () => {
-      const previous = await this.database.db.timerStates.get('active')
       const now = new Date().toISOString()
-      await this.database.transaction(async () => {
+      await this.database.transaction(async db => {
+        const previous = await db.timerStates.get('active')
+        // A new native installation must not upload a fresh idle timer over
+        // a session that is active on another device.
+        if (this.database.owner !== undefined && !previous && initialIdle) return
         const record: TimerStateRecord = {
         id: 'active',
         snapshot: queued,
@@ -53,8 +57,8 @@ export class TimerRepository implements DurableTimerStorage {
         syncStatus: 'PENDING',
         version: (previous?.version ?? 0) + 1,
         }
-        await this.database.db.timerStates.put(record)
-        await this.queue.enqueueWithinTransaction({ entityType: 'TIMER_STATE', entityId: 'active', operation: previous ? 'UPDATE' : 'INSERT', payload: record,
+        await db.timerStates.put(record)
+        await this.queue.enqueueWithinTransaction(db, { entityType: 'TIMER_STATE', entityId: 'active', operation: previous ? 'UPDATE' : 'INSERT', payload: record,
           baseVersion: previous?.version ?? 0, baseUpdatedAt: previous?.updatedAt ?? null })
       })
     })

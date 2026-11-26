@@ -1,4 +1,3 @@
-import { liveQuery } from 'dexie'
 import { NOTIFICATION_SETTINGS_KEY, REMINDER_PREFIX, reminderKey, type NotificationPreferences, type ReminderRule, type ReminderTarget } from '../../../types/notification'
 import { isHabitReminder, isTaskReminder, type ReminderSchedule } from '../../notification/ReminderScheduler'
 import { DatabaseService, databaseService } from '../DatabaseService'
@@ -17,10 +16,10 @@ export class ReminderRepository {
   read() { return this.settings.get<Partial<NotificationPreferences>>(NOTIFICATION_SETTINGS_KEY) }
   write(value: NotificationPreferences) { return this.settings.set(NOTIFICATION_SETTINGS_KEY, value) }
 
-  observePreferences() { return liveQuery(() => this.read()) }
+  observePreferences() { return this.database.observe(['userSettings'], () => this.read()) }
 
   observeRule(target: ReminderTarget, id: string) {
-    return liveQuery(async () => {
+    return this.database.observe(['userSettings'], async () => {
       const rule = await this.settings.get<unknown>(reminderKey(target, id))
       return (target === 'task' ? isTaskReminder(rule) : isHabitReminder(rule)) ? rule as ReminderRule : null
     })
@@ -33,12 +32,11 @@ export class ReminderRepository {
     await this.settings.set(key, rule)
   }
 
-  observeSchedule() { return liveQuery(() => this.schedule()) }
+  observeSchedule() { return this.database.observe(['userSettings', 'tasks', 'habits'], () => this.schedule()) }
 
   async schedule(): Promise<ReminderSchedule> {
     await this.database.initialize()
-    const { db } = this.database
-    return db.transaction('r', [db.userSettings, db.tasks, db.habits], async () => {
+    return this.database.read(['userSettings', 'tasks', 'habits'], async db => {
       const settings = await db.userSettings.where('id').startsWith(REMINDER_PREFIX).filter(row => !row.deletedAt).toArray()
       const tasks: ReminderSchedule['tasks'] = []
       const habits: ReminderSchedule['habits'] = []

@@ -101,7 +101,7 @@ describe('ReminderScheduler', () => {
     const right = new ReminderRepository(database)
     const claims = await Promise.all([left.claim('same-event', current), right.claim('same-event', current)])
     expect(claims.filter(Boolean)).toHaveLength(1)
-    const reopened = new DatabaseService(database.db.name)
+    const reopened = new DatabaseService(database.indexedDb.name)
     try { expect(await new ReminderRepository(reopened).claim('same-event', current)).toBe(false) }
     finally { reopened.close() }
   })

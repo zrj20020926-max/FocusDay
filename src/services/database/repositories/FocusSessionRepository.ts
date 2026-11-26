@@ -51,34 +51,37 @@ export class FocusSessionRepository implements FocusSessionRepositoryPort {
   }
 
   async upsert(session: FocusSession): Promise<FocusSession> {
-    await this.database.initialize()
-    const previous = await this.database.db.focusSessions.get(session.id)
-    await this.database.transaction(async () => {
-      const record = toRecord(session, previous)
-      await this.database.db.focusSessions.put(record)
-      await this.queue.enqueueWithinTransaction({ entityType: 'FOCUS_SESSION', entityId: session.id, operation: previous ? 'UPDATE' : 'INSERT', payload: record,
+    return this.database.transaction(async db => {
+      const previous = session.sourceRecordId
+        ? await db.focusSessions.where('sourceRecordId').equals(session.sourceRecordId).first()
+        : await db.focusSessions.get(session.id)
+      if (previous?.deletedAt) return toSession(previous)
+      const canonical = previous ? { ...session, id: previous.id } : session
+      const record = toRecord(canonical, previous)
+      await db.focusSessions.put(record)
+      await this.queue.enqueueWithinTransaction(db, { entityType: 'FOCUS_SESSION', entityId: record.id, operation: previous ? 'UPDATE' : 'INSERT', payload: record,
         baseVersion: previous?.version ?? 0, baseUpdatedAt: previous ? new Date(previous.updatedAt).toISOString() : null })
+      return clone(canonical)
     })
-    return clone(session)
   }
 
   async bulkUpsert(sessions: FocusSession[]): Promise<FocusSession[]> {
     if (sessions.length === 0) return []
-    return this.database.transaction(async () => {
+    return this.database.transaction(async db => {
       const unique = new Map<string, FocusSession>()
       for (const session of sessions) unique.set(session.sourceRecordId ?? session.id, session)
       const candidates = [...unique.values()]
       const sources = candidates.flatMap(session => session.sourceRecordId ? [session.sourceRecordId] : [])
-      const sourceMatches = sources.length ? await this.database.db.focusSessions.where('sourceRecordId').anyOf(sources).toArray() : []
+      const sourceMatches = sources.length ? await db.focusSessions.where('sourceRecordId').anyOf(sources).toArray() : []
       const sourceIds = new Map(sourceMatches.map(record => [record.sourceRecordId, record]))
       const accepted = candidates.filter(session => {
         const previous = sourceIds.get(session.sourceRecordId)
         return !previous || (previous.id === session.id && !previous.deletedAt)
       })
-      const previous = await this.database.db.focusSessions.bulkGet(accepted.map(session => session.id))
+      const previous = await db.focusSessions.bulkGet(accepted.map(session => session.id))
       const records = accepted.map((session, index) => toRecord(session, previous[index]))
-      await this.database.db.focusSessions.bulkPut(records)
-      await Promise.all(records.map((record, index) => this.queue.enqueueWithinTransaction({ entityType: 'FOCUS_SESSION', entityId: record.id,
+      await db.focusSessions.bulkPut(records)
+      await Promise.all(records.map((record, index) => this.queue.enqueueWithinTransaction(db, { entityType: 'FOCUS_SESSION', entityId: record.id,
         operation: previous[index] ? 'UPDATE' : 'INSERT', payload: record, baseVersion: previous[index]?.version ?? 0,
         baseUpdatedAt: previous[index] ? new Date(previous[index]!.updatedAt).toISOString() : null })))
       return clone(accepted)
@@ -86,16 +89,15 @@ export class FocusSessionRepository implements FocusSessionRepositoryPort {
   }
 
   async softDelete(id: string): Promise<boolean> {
-    await this.database.initialize()
-    const current = await this.database.db.focusSessions.get(id)
-    if (!current || current.deletedAt) return false
-    const now = Date.now()
-    await this.database.transaction(async () => {
+    return this.database.transaction(async db => {
+      const current = await db.focusSessions.get(id)
+      if (!current || current.deletedAt) return false
+      const now = Date.now()
       const record = { ...current, deletedAt: now, updatedAt: now, syncStatus: 'PENDING' as const, version: current.version + 1 }
-      await this.database.db.focusSessions.put(record)
-      await this.queue.enqueueWithinTransaction({ entityType: 'FOCUS_SESSION', entityId: id, operation: 'DELETE', payload: record,
+      await db.focusSessions.put(record)
+      await this.queue.enqueueWithinTransaction(db, { entityType: 'FOCUS_SESSION', entityId: id, operation: 'DELETE', payload: record,
         baseVersion: current.version, baseUpdatedAt: new Date(current.updatedAt).toISOString() })
+      return true
     })
-    return true
   }
 }

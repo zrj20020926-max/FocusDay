@@ -66,7 +66,7 @@ describe('HabitService', () => {
 
   it('队列写入失败会回滚打卡', async () => {
     const habit = await service.create(defaults)
-    database.db.syncQueue.hook('creating', () => { throw new Error('queue failure') })
+    database.indexedDb.syncQueue.hook('creating', () => { throw new Error('queue failure') })
     await expect(service.checkIn(habit.id, '2024-03-11')).rejects.toThrow('queue failure')
     expect(await database.db.habitRecords.count()).toBe(0)
   })

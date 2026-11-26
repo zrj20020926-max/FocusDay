@@ -18,24 +18,24 @@ export class HabitRepository implements HabitRepositoryPort {
     return !record || record.deletedAt ? null : toHabit(record)
   }
   async upsert(habit: Habit): Promise<Habit> {
-    await this.database.transaction(async () => {
-      const previous = await this.database.db.habits.get(habit.id)
+    await this.database.transaction(async db => {
+      const previous = await db.habits.get(habit.id)
       if (previous?.deletedAt) throw new Error('习惯已删除，无法编辑')
       const record: HabitEntityRecord = { ...clone(habit), syncStatus: 'PENDING', version: (previous?.version ?? 0) + 1 }
-      await this.database.db.habits.put(record)
-      await this.queue.enqueueWithinTransaction({ entityType: 'HABIT', entityId: habit.id, operation: previous ? 'UPDATE' : 'INSERT', payload: record,
+      await db.habits.put(record)
+      await this.queue.enqueueWithinTransaction(db, { entityType: 'HABIT', entityId: habit.id, operation: previous ? 'UPDATE' : 'INSERT', payload: record,
         baseVersion: previous?.version ?? 0, baseUpdatedAt: previous?.updatedAt ?? null })
     })
     return clone(habit)
   }
   async softDelete(id: string): Promise<boolean> {
-    return this.database.transaction(async () => {
-      const previous = await this.database.db.habits.get(id)
+    return this.database.transaction(async db => {
+      const previous = await db.habits.get(id)
       if (!previous || previous.deletedAt) return false
       const now = new Date().toISOString()
       const record: HabitEntityRecord = { ...previous, deletedAt: now, updatedAt: now, syncStatus: 'PENDING', version: previous.version + 1 }
-      await this.database.db.habits.put(record)
-      await this.queue.enqueueWithinTransaction({ entityType: 'HABIT', entityId: id, operation: 'DELETE', payload: record,
+      await db.habits.put(record)
+      await this.queue.enqueueWithinTransaction(db, { entityType: 'HABIT', entityId: id, operation: 'DELETE', payload: record,
         baseVersion: previous.version, baseUpdatedAt: previous.updatedAt })
       return true
     })
